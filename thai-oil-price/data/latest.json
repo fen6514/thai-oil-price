@@ -1,0 +1,91 @@
+{
+  "date": "2026-11-14",
+  "updated": "2026-11-14T23:01+07:00",
+  "prices": [
+    {
+      "brand": "PTT",
+      "product": "Diesel B20",
+      "price": 33.5
+    },
+    {
+      "brand": "PTT",
+      "product": "Diesel",
+      "price": 40.79
+    },
+    {
+      "brand": "PTT",
+      "product": "Gasohol E20",
+      "price": 31.3
+    },
+    {
+      "brand": "PTT",
+      "product": "Gasohol 91",
+      "price": 38.97
+    },
+    {
+      "brand": "PTT",
+      "product": "Gasohol 95",
+      "price": 39.34
+    },
+    {
+      "brand": "PTT",
+      "product": "Gasoline 95",
+      "price": 48.83
+    },
+    {
+      "brand": "PTT",
+      "product": "Super Power GSH95",
+      "price": 47.05
+    },
+    {
+      "brand": "PTT",
+      "product": "Premium Diesel",
+      "price": 49.05
+    },
+    {
+      "brand": "PTT",
+      "product": "Super Power X99",
+      "price": 49.05
+    },
+    {
+      "brand": "Bangchak",
+      "product": "DIESEL B20",
+      "price": 33.5
+    },
+    {
+      "brand": "Bangchak",
+      "product": "Hi Diesel S",
+      "price": 40.79
+    },
+    {
+      "brand": "Bangchak",
+      "product": "Hi Premium Diesel Plus",
+      "price": 49.05
+    },
+    {
+      "brand": "Bangchak",
+      "product": "Hi Premium 98 Plus",
+      "price": 48.55
+    },
+    {
+      "brand": "Bangchak",
+      "product": "Gasohol E85 S EVO",
+      "price": 30.63
+    },
+    {
+      "brand": "Bangchak",
+      "product": "Gasohol E20 S EVO",
+      "price": 31.3
+    },
+    {
+      "brand": "Bangchak",
+      "product": "Gasohol 91 S EVO",
+      "price": 38.97
+    },
+    {
+      "brand": "Bangchak",
+      "product": "Gasohol 95 S EVO",
+      "price": 39.34
+    }
+  ]
+}
