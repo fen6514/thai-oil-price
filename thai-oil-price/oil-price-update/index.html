@@ -1,0 +1,217 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Thai Oil Price Tracker · ราคาน้ำมันวันนี้</title>
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
+<style>
+  :root { --bg:#f6f5f1; --card:#fff; --ink:#1d1d1b; --muted:#77736a; --line:#e6e3dc;
+          --up:#c0392b; --down:#1e8449; --accent:#d35400; }
+  * { box-sizing:border-box; }
+  body { margin:0; font-family: system-ui, -apple-system, "Segoe UI", "Noto Sans Thai", sans-serif;
+         background:var(--bg); color:var(--ink); }
+  .wrap { max-width:960px; margin:0 auto; padding:32px 20px 60px; }
+  header h1 { margin:0; font-size:28px; letter-spacing:-.5px; }
+  header p { margin:6px 0 0; color:var(--muted); }
+  .tabs { display:flex; gap:8px; margin:24px 0 14px; flex-wrap:wrap; }
+  .tabs button { border:1px solid var(--line); background:var(--card); padding:8px 16px;
+                 border-radius:999px; cursor:pointer; font:inherit; }
+  .tabs button.on { background:var(--ink); color:#fff; border-color:var(--ink); }
+  .card { background:var(--card); border:1px solid var(--line); border-radius:14px; padding:20px; margin-bottom:18px; }
+  table { width:100%; border-collapse:collapse; }
+  th, td { padding:10px 8px; text-align:left; border-bottom:1px solid var(--line); }
+  th { font-size:12px; text-transform:uppercase; letter-spacing:.5px; color:var(--muted); font-weight:600; }
+  td.num, th.num { text-align:right; font-variant-numeric:tabular-nums; }
+  tr:last-child td { border-bottom:none; }
+  td input { accent-color:var(--accent); }
+  .up { color:var(--up); } .down { color:var(--down); } .flat { color:var(--muted); }
+  .row { display:flex; justify-content:space-between; align-items:center; gap:12px; flex-wrap:wrap; margin-bottom:10px; }
+  .row h2 { margin:0; font-size:18px; }
+  select { font:inherit; padding:6px 10px; border-radius:8px; border:1px solid var(--line); background:#fff; }
+  .chartbox { position:relative; height:340px; }
+  .empty { color:var(--muted); padding:30px 0; text-align:center; }
+  footer { color:var(--muted); font-size:13px; margin-top:26px; }
+  a { color:var(--accent); }
+  .outlook { display:grid; grid-template-columns:1fr 1fr; gap:18px; margin-bottom:18px; }
+  .outlook .card { margin:0; }
+  .outlook h3 { margin:0 0 4px; font-size:13px; text-transform:uppercase; letter-spacing:.5px; color:var(--muted); }
+  .big { font-size:24px; font-weight:700; margin:6px 0 6px; }
+  .note { color:var(--muted); font-size:13px; line-height:1.5; margin:8px 0 0; }
+  .mini { position:relative; height:90px; margin-top:10px; }
+  .chg { display:flex; justify-content:space-between; padding:6px 0; border-bottom:1px solid var(--line); }
+  .chg:last-child { border-bottom:none; }
+  @media (max-width:700px) { .outlook { grid-template-columns:1fr; } }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <h1>⛽ Thai Oil Price Tracker</h1>
+    <p>ราคาน้ำมันขายปลีกวันนี้ · Updated every morning (Bangkok time) · <span id="updated">loading…</span></p>
+  </header>
+
+  <div class="tabs" id="tabs"></div>
+
+  <div class="outlook" id="outlook" hidden>
+    <div class="card" id="tmrCard" hidden>
+      <h3>Announced for tomorrow</h3>
+      <div id="tmrBody"></div>
+    </div>
+    <div class="card" id="sigCard" hidden>
+      <h3>Trend outlook · next few days</h3>
+      <div class="big" id="sigBig"></div>
+      <div id="sigText"></div>
+      <div class="mini"><canvas id="mini"></canvas></div>
+      <p class="note">A rough guide, not a guarantee. Thai pump prices tend to follow world oil prices a few days later, but the government's Oil Fuel Fund can hold prices steady or change them for other reasons.</p>
+    </div>
+  </div>
+
+  <div class="card">
+    <div class="row"><h2 id="todayTitle">Today's prices</h2></div>
+    <table>
+      <thead><tr><th>Chart</th><th>Fuel</th><th class="num">Baht / litre</th><th class="num">Change</th></tr></thead>
+      <tbody id="tbody"><tr><td colspan="4" class="empty">Loading…</td></tr></tbody>
+    </table>
+  </div>
+
+  <div class="card">
+    <div class="row">
+      <h2>Price history</h2>
+      <select id="range">
+        <option value="30">Last 30 days</option>
+        <option value="90" selected>Last 90 days</option>
+        <option value="365">Last year</option>
+        <option value="0">All</option>
+      </select>
+    </div>
+    <div class="chartbox"><canvas id="chart"></canvas></div>
+  </div>
+
+  <footer>
+    Data from PTT and Bangchak public price feeds; world crude prices from Yahoo Finance. Prices exclude local maintenance tax, which varies by area.
+    <a href="data/prices.csv" download>Download all data (CSV)</a>
+  </footer>
+</div>
+
+<script>
+const COLORS = ["#d35400","#2471a3","#1e8449","#8e44ad","#c0392b","#b7950b","#17a589","#5d6d7e","#e84393","#34495e","#a04000","#7d3c98"];
+let rows = [], brand = null, chart = null;
+const picked = {}; // brand -> Set of products shown on chart
+
+function parseCSV(text) {
+  const [head, ...lines] = text.trim().split(/\r?\n/);
+  const keys = head.split(",");
+  return lines.map(l => {
+    // handles quoted cells like "Gasohol 95, Premium"
+    const out = [], re = /("(?:[^"]|"")*"|[^,]*)(,|$)/g; let x;
+    while ((x = re.exec(l)) && x[0] !== "") { out.push(x[1].replace(/^"|"$/g,"").replace(/""/g,'"')); if (!x[2]) break; }
+    const o = {}; keys.forEach((k, i) => o[k] = out[i]); o.price = +o.price; return o;
+  });
+}
+
+function datesFor(b) { return [...new Set(rows.filter(r => r.brand === b).map(r => r.date))].sort(); }
+
+function renderTabs() {
+  const brands = [...new Set(rows.map(r => r.brand))].sort((a,b) => a === "PTT" ? -1 : b === "PTT" ? 1 : a.localeCompare(b));
+  brand = brand || brands[0];
+  document.getElementById("tabs").innerHTML = brands.map(b =>
+    `<button class="${b === brand ? "on" : ""}" onclick="brand='${b}';renderAll()">${b}</button>`).join("");
+}
+
+function renderTable() {
+  const dates = datesFor(brand), last = dates.at(-1), prev = dates.at(-2);
+  const fmtDate = d => new Date(d + "T00:00:00").toLocaleDateString("en-GB", {weekday:"short", day:"numeric", month:"short", year:"numeric"});
+  document.getElementById("todayTitle").textContent = `${brand} prices — ${fmtDate(last)}`;
+  const prevMap = Object.fromEntries(rows.filter(r => r.brand === brand && r.date === prev).map(r => [r.product, r.price]));
+  const today = rows.filter(r => r.brand === brand && r.date === last).sort((a,b) => a.price - b.price);
+  if (!picked[brand]) picked[brand] = new Set(today.slice(0, 4).map(r => r.product));
+  document.getElementById("tbody").innerHTML = today.map(r => {
+    const p = prevMap[r.product];
+    let chg = '<span class="flat">—</span>';
+    if (p !== undefined) {
+      const d = +(r.price - p).toFixed(2);
+      chg = d > 0 ? `<span class="up">▲ ${d.toFixed(2)}</span>` : d < 0 ? `<span class="down">▼ ${Math.abs(d).toFixed(2)}</span>` : '<span class="flat">0.00</span>';
+    }
+    const on = picked[brand].has(r.product) ? "checked" : "";
+    return `<tr><td><input type="checkbox" ${on} data-p="${r.product.replace(/"/g,"&quot;")}"></td>
+      <td>${r.product}</td><td class="num"><b>${r.price.toFixed(2)}</b></td><td class="num">${chg}</td></tr>`;
+  }).join("") || '<tr><td colspan="4" class="empty">No data yet</td></tr>';
+  document.querySelectorAll("#tbody input").forEach(cb => cb.onchange = () => {
+    cb.checked ? picked[brand].add(cb.dataset.p) : picked[brand].delete(cb.dataset.p); renderChart();
+  });
+}
+
+function renderChart() {
+  const days = +document.getElementById("range").value;
+  let dates = datesFor(brand);
+  if (days) { const cut = new Date(Date.now() - days * 864e5).toISOString().slice(0,10); dates = dates.filter(d => d >= cut); }
+  const products = [...picked[brand]];
+  const datasets = products.map((p, i) => {
+    const m = Object.fromEntries(rows.filter(r => r.brand === brand && r.product === p).map(r => [r.date, r.price]));
+    return { label: p, data: dates.map(d => m[d] ?? null), borderColor: COLORS[i % COLORS.length],
+             backgroundColor: COLORS[i % COLORS.length], stepped: true, pointRadius: dates.length > 60 ? 0 : 2, spanGaps: true, borderWidth: 2 };
+  });
+  if (chart) chart.destroy();
+  chart = new Chart(document.getElementById("chart"), {
+    type: "line", data: { labels: dates, datasets },
+    options: { maintainAspectRatio: false, interaction: { mode: "index", intersect: false },
+      plugins: { legend: { position: "bottom" }, tooltip: { callbacks: { label: c => `${c.dataset.label}: ${c.parsed.y?.toFixed(2)} ฿` } } },
+      scales: { y: { title: { display: true, text: "Baht / litre" } }, x: { ticks: { maxTicksLimit: 8 } } } }
+  });
+}
+
+
+function renderOutlook(tmr, sig, world) {
+  const todayStr = new Date(Date.now() + 7*3600e3).toISOString().slice(0,10); // Bangkok date
+  let show = false;
+  if (tmr && tmr.for_date > todayStr && tmr.items.length) {
+    show = true; document.getElementById("tmrCard").hidden = false;
+    const moved = tmr.items.filter(i => i.change !== 0);
+    const day = new Date(tmr.for_date + "T00:00:00").toLocaleDateString("en-GB", {weekday:"long", day:"numeric", month:"short"});
+    document.getElementById("tmrBody").innerHTML = moved.length
+      ? `<div class="big ${moved[0].change > 0 ? "up" : "down"}">${moved[0].change > 0 ? "▲ Prices go up" : "▼ Prices go down"}</div>
+         <p class="note" style="margin-top:0">Officially announced by Bangchak for ${day}:</p>` +
+        moved.map(i => `<div class="chg"><span>${i.product}</span><span class="${i.change > 0 ? "up" : "down"}">${i.today.toFixed(2)} → <b>${i.tomorrow.toFixed(2)}</b> (${i.change > 0 ? "+" : ""}${i.change.toFixed(2)})</span></div>`).join("")
+      : `<div class="big flat">No change announced</div>
+         <p class="note">Bangchak hasn't announced any price change for ${day} yet. Changes are usually announced the evening before; this is checked again around 18:15.</p>`;
+  }
+  if (sig) {
+    show = true; document.getElementById("sigCard").hidden = false;
+    const map = { up: ["▲ Likely to rise", "up"], down: ["▼ Likely to fall", "down"], flat: ["● Probably no big change", "flat"] };
+    const [label, cls] = map[sig.direction];
+    const big = document.getElementById("sigBig"); big.textContent = label; big.className = "big " + cls;
+    document.getElementById("sigText").innerHTML =
+      `World crude (Brent, in baht) moved <b class="${cls}">${sig.change_pct > 0 ? "+" : ""}${sig.change_pct.toFixed(1)}%</b> over the last 5 trading days.
+       <span class="note">Brent $${sig.brent_usd.toFixed(2)} × ${sig.usdthb.toFixed(2)} ฿/$. Moves smaller than ±${sig.threshold_pct}% count as "no big change".</span>`;
+    if (world.length) {
+      const w = world.slice(-60);
+      new Chart(document.getElementById("mini"), { type: "line",
+        data: { labels: w.map(r => r.date), datasets: [{ data: w.map(r => +r.brent_thb), borderColor: "#d35400", borderWidth: 2, pointRadius: 0, tension: .3 }] },
+        options: { maintainAspectRatio: false, plugins: { legend: { display: false },
+          tooltip: { callbacks: { label: c => `Brent ${(+c.parsed.y).toFixed(0)} ฿/barrel` } } },
+          scales: { x: { display: false }, y: { ticks: { maxTicksLimit: 3 } } } } });
+    }
+  }
+  document.getElementById("outlook").hidden = !show;
+}
+
+function renderAll() { renderTabs(); renderTable(); renderChart(); }
+document.getElementById("range").onchange = renderChart;
+
+Promise.all([
+  fetch("data/prices.csv", {cache: "no-store"}).then(r => r.ok ? r.text() : ""),
+  fetch("data/latest.json", {cache: "no-store"}).then(r => r.ok ? r.json() : null).catch(() => null),
+  fetch("data/tomorrow.json", {cache: "no-store"}).then(r => r.ok ? r.json() : null).catch(() => null),
+  fetch("data/signal.json", {cache: "no-store"}).then(r => r.ok ? r.json() : null).catch(() => null),
+  fetch("data/world.csv", {cache: "no-store"}).then(r => r.ok ? r.text() : "").catch(() => "")
+]).then(([csv, latest, tmr, sig, worldCsv]) => {
+  try { renderOutlook(tmr, sig, worldCsv ? parseCSV(worldCsv) : []); } catch (e) { console.error(e); }
+  document.getElementById("updated").textContent = latest ? "last fetched " + latest.updated.replace("T", " ").slice(0, 16) : "no data yet";
+  rows = csv ? parseCSV(csv) : [];
+  if (!rows.length) { document.getElementById("tbody").innerHTML = '<tr><td colspan="4" class="empty">No data yet — run the “Update oil prices” workflow once on GitHub.</td></tr>'; return; }
+  renderAll();
+});
+</script>
+</body>
+</html>
