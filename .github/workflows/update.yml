@@ -4,7 +4,7 @@ on:
     schedule:
       - cron: "17 23 * * *"   # 06:17 Bangkok: today's prices + world trend
       - cron: "17 11 * * *"   # 18:17 Bangkok: tomorrow's announced prices
-  workflow_dispatch:
+    workflow_dispatch:
 
 permissions:
   contents: write
