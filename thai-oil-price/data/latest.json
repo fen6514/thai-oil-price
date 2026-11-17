@@ -1,6 +1,6 @@
 {
-  "date": "2026-11-17",
-  "updated": "2026-11-17T18:56+07:00",
+  "date": "2026-11-18",
+  "updated": "2026-11-18T06:57+07:00",
   "prices": [
     {
       "brand": "PTT",
@@ -10,27 +10,27 @@
     {
       "brand": "PTT",
       "product": "Diesel",
-      "price": 40.79
+      "price": 39.99
     },
     {
       "brand": "PTT",
       "product": "Gasohol E20",
-      "price": 31.3
+      "price": 30.8
     },
     {
       "brand": "PTT",
       "product": "Gasohol 91",
-      "price": 38.97
+      "price": 38.47
     },
     {
       "brand": "PTT",
       "product": "Gasohol 95",
-      "price": 39.34
+      "price": 38.84
     },
     {
       "brand": "PTT",
       "product": "Gasoline 95",
-      "price": 48.83
+      "price": 48.33
     },
     {
       "brand": "PTT",
@@ -55,7 +55,7 @@
     {
       "brand": "Bangchak",
       "product": "Hi Diesel S",
-      "price": 40.79
+      "price": 39.99
     },
     {
       "brand": "Bangchak",
@@ -75,17 +75,17 @@
     {
       "brand": "Bangchak",
       "product": "Gasohol E20 S EVO",
-      "price": 31.3
+      "price": 30.8
     },
     {
       "brand": "Bangchak",
       "product": "Gasohol 91 S EVO",
-      "price": 38.97
+      "price": 38.47
     },
     {
       "brand": "Bangchak",
       "product": "Gasohol 95 S EVO",
-      "price": 39.34
+      "price": 38.84
     }
   ]
 }
