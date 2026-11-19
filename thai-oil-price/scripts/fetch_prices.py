@@ -2,11 +2,11 @@
 Fetch today's Thai retail fuel prices and append them to data/prices.csv.
 
 Sources (tried in order, both if possible):
-  1. PTT (OR) public price web service
-  2. Bangchak public price feed
+1. PTT (OR) public price web service
+2. Bangchak public price feed
 
 Uses only the Python standard library, so no installs are needed.
-Run:  python scripts/fetch_prices.py
+Run: python scripts/fetch_prices.py
 """
 
 import csv
@@ -23,6 +23,10 @@ BKK = timezone(timedelta(hours=7))
 ROOT = Path(__file__).resolve().parent.parent
 CSV_PATH = ROOT / "data" / "prices.csv"
 LATEST_PATH = ROOT / "data" / "latest.json"
+TOMORROW_PATH = ROOT / "data" / "tomorrow.json"
+WORLD_PATH = ROOT / "data" / "world.csv"
+SIGNAL_PATH = ROOT / "data" / "signal.json"
+THRESHOLD = 2.0  # % move in world crude needed to call "up" or "down"
 FIELDS = ["date", "brand", "product", "price"]
 UA = "Mozilla/5.0 (thai-oil-price tracker)"
 
@@ -86,8 +90,50 @@ def fetch_bangchak():
         name = (o.get("OilName") or "").strip()
         price = to_price(o.get("PriceToday"))
         if name and price:
-            rows.append({"brand": "Bangchak", "product": name, "price": price})
+            rows.append({"brand": "Bangchak", "product": name, "price": price,
+                         "tomorrow": to_price(o.get("PriceTomorrow"))})
     return rows
+
+
+# ---------- world crude (for the trend signal) ----------
+def yahoo_closes(symbol):
+    """Daily closes for the last ~3 months from Yahoo Finance: {date: close}."""
+    url = f"https://query1.finance.yahoo.com/v8/finance/chart/{symbol}?range=3mo&interval=1d"
+    res = json.loads(http(url))["chart"]["result"][0]
+    out = {}
+    for ts, c in zip(res["timestamp"], res["indicators"]["quote"][0]["close"]):
+        if c is not None:
+            out[datetime.fromtimestamp(ts, BKK).strftime("%Y-%m-%d")] = round(c, 4)
+    return out
+
+
+def update_world():
+    brent = yahoo_closes("BZ=F")  # Brent crude, USD/barrel
+    fx = yahoo_closes("THB=X")    # baht per USD
+    rows, last_fx = [], None
+    for d in sorted(brent):
+        last_fx = fx.get(d, last_fx)
+        if last_fx:
+            rows.append({"date": d, "brent_usd": brent[d], "usdthb": last_fx,
+                         "brent_thb": round(brent[d] * last_fx, 2)})
+    if len(rows) < 7:
+        raise ValueError("not enough world price data")
+    with WORLD_PATH.open("w", newline="", encoding="utf-8") as f:
+        w = csv.DictWriter(f, fieldnames=["date", "brent_usd", "usdthb", "brent_thb"])
+        w.writeheader()
+        w.writerows(rows)
+
+    # Signal: % change of Brent (in baht) over the last 5 trading days.
+    # Thai pump prices follow world prices with a lag of several days.
+    now, before = rows[-1]["brent_thb"], rows[-6]["brent_thb"]
+    pct = round((now / before - 1) * 100, 2)
+    direction = "up" if pct >= THRESHOLD else "down" if pct <= -THRESHOLD else "flat"
+    SIGNAL_PATH.write_text(json.dumps({
+        "direction": direction, "change_pct": pct, "threshold_pct": THRESHOLD,
+        "from": rows[-6]["date"], "to": rows[-1]["date"],
+        "brent_usd": rows[-1]["brent_usd"], "usdthb": rows[-1]["usdthb"],
+    }, indent=2), encoding="utf-8")
+    return direction, pct
 
 
 # ---------- save ----------
@@ -97,7 +143,7 @@ def save(today, rows):
     if CSV_PATH.exists():
         with CSV_PATH.open(newline="", encoding="utf-8") as f:
             existing = [r for r in csv.DictReader(f) if r["date"] != today]  # re-run safe
-    new = [{"date": today, **r} for r in rows]
+    new = [{"date": today, "brand": r["brand"], "product": r["product"], "price": r["price"]} for r in rows]
     all_rows = sorted(existing + new, key=lambda r: (r["date"], r["brand"], r["product"]))
     with CSV_PATH.open("w", newline="", encoding="utf-8") as f:
         w = csv.DictWriter(f, fieldnames=FIELDS)
@@ -108,6 +154,15 @@ def save(today, rows):
                    ensure_ascii=False, indent=2),
         encoding="utf-8",
     )
+
+
+def save_tomorrow(today, rows):
+    tmr = (datetime.strptime(today, "%Y-%m-%d") + timedelta(days=1)).strftime("%Y-%m-%d")
+    items = [{"brand": r["brand"], "product": r["product"], "today": r["price"], "tomorrow": r["tomorrow"],
+              "change": round(r["tomorrow"] - r["price"], 2)}
+             for r in rows if r.get("tomorrow")]
+    TOMORROW_PATH.write_text(json.dumps({"for_date": tmr, "checked": datetime.now(BKK).isoformat(timespec="minutes"),
+                                         "items": items}, ensure_ascii=False, indent=2), encoding="utf-8")
 
 
 def main():
@@ -125,7 +180,14 @@ def main():
     if not rows:
         sys.exit("No prices fetched from any source:\n" + "\n".join(errors))
     save(today, rows)
+    save_tomorrow(today, rows)
     print(f"Saved {len(rows)} prices for {today}")
+
+    try:  # optional: never let this break the price update
+        d, pct = update_world()
+        print(f"World trend: {d} ({pct:+.2f}% over 5 trading days)")
+    except Exception as e:
+        print(f"World trend skipped: {e}", file=sys.stderr)
 
 
 if __name__ == "__main__":
