@@ -1,0 +1,62 @@
+{
+  "for_date": "2026-11-20",
+  "checked": "2026-11-19T20:03+07:00",
+  "items": [
+    {
+      "brand": "Bangchak",
+      "product": "DIESEL B20",
+      "today": 33.5,
+      "tomorrow": 33.5,
+      "change": 0.0
+    },
+    {
+      "brand": "Bangchak",
+      "product": "Hi Diesel S",
+      "today": 39.99,
+      "tomorrow": 39.99,
+      "change": 0.0
+    },
+    {
+      "brand": "Bangchak",
+      "product": "Hi Premium Diesel Plus",
+      "today": 49.05,
+      "tomorrow": 49.05,
+      "change": 0.0
+    },
+    {
+      "brand": "Bangchak",
+      "product": "Hi Premium 98 Plus",
+      "today": 48.55,
+      "tomorrow": 48.55,
+      "change": 0.0
+    },
+    {
+      "brand": "Bangchak",
+      "product": "Gasohol E85 S EVO",
+      "today": 30.63,
+      "tomorrow": 30.63,
+      "change": 0.0
+    },
+    {
+      "brand": "Bangchak",
+      "product": "Gasohol E20 S EVO",
+      "today": 30.1,
+      "tomorrow": 30.1,
+      "change": 0.0
+    },
+    {
+      "brand": "Bangchak",
+      "product": "Gasohol 91 S EVO",
+      "today": 37.77,
+      "tomorrow": 37.77,
+      "change": 0.0
+    },
+    {
+      "brand": "Bangchak",
+      "product": "Gasohol 95 S EVO",
+      "today": 38.14,
+      "tomorrow": 38.14,
+      "change": 0.0
+    }
+  ]
+}

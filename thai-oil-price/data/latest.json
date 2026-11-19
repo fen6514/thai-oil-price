@@ -1,6 +1,6 @@
 {
   "date": "2026-11-19",
-  "updated": "2026-11-19T19:04+07:00",
+  "updated": "2026-11-19T20:03+07:00",
   "prices": [
     {
       "brand": "PTT",
@@ -50,42 +50,50 @@
     {
       "brand": "Bangchak",
       "product": "DIESEL B20",
-      "price": 33.5
+      "price": 33.5,
+      "tomorrow": 33.5
     },
     {
       "brand": "Bangchak",
       "product": "Hi Diesel S",
-      "price": 39.99
+      "price": 39.99,
+      "tomorrow": 39.99
     },
     {
       "brand": "Bangchak",
       "product": "Hi Premium Diesel Plus",
-      "price": 49.05
+      "price": 49.05,
+      "tomorrow": 49.05
     },
     {
       "brand": "Bangchak",
       "product": "Hi Premium 98 Plus",
-      "price": 48.55
+      "price": 48.55,
+      "tomorrow": 48.55
     },
     {
       "brand": "Bangchak",
       "product": "Gasohol E85 S EVO",
-      "price": 30.63
+      "price": 30.63,
+      "tomorrow": 30.63
     },
     {
       "brand": "Bangchak",
       "product": "Gasohol E20 S EVO",
-      "price": 30.1
+      "price": 30.1,
+      "tomorrow": 30.1
     },
     {
       "brand": "Bangchak",
       "product": "Gasohol 91 S EVO",
-      "price": 37.77
+      "price": 37.77,
+      "tomorrow": 37.77
     },
     {
       "brand": "Bangchak",
       "product": "Gasohol 95 S EVO",
-      "price": 38.14
+      "price": 38.14,
+      "tomorrow": 38.14
     }
   ]
 }
