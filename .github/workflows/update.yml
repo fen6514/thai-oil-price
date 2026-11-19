@@ -12,6 +12,9 @@ permissions:
 jobs:
   update:
     runs-on: ubuntu-latest
+    env:
+      LINE_TOKEN: ${{ secrets.LINE_TOKEN }}
+      SITE_URL: ${{ secrets.SITE_URL }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -26,3 +29,6 @@ jobs:
           git add thai-oil-price/data/
           git diff --cached --quiet || git commit -m "Prices update"
           git push
+      - name: Send LINE report
+        if: env.LINE_TOKEN != '' && (github.event.schedule == '17 11 * * *' || github.event_name == 'workflow_dispatch')
+        run: python thai-oil-price/scripts/send_line.py
