@@ -22,7 +22,8 @@ from pathlib import Path
 BKK = timezone(timedelta(hours=7))
 DATA = Path(__file__).resolve().parent.parent / "data"
 BROADCAST_URL = "https://api.line.me/v2/bot/message/broadcast"
-BRAND = "Bangchak"
+BRAND = "Bangchak"  # the only source that announces tomorrow's price
+BRANDS = [("PTT", "ปตท. (PTT)"), ("Bangchak", "บางจาก (Bangchak)")]
 
 TH_MONTHS = ["ม.ค.", "ก.พ.", "มี.ค.", "เม.ย.", "พ.ค.", "มิ.ย.",
              "ก.ค.", "ส.ค.", "ก.ย.", "ต.ค.", "พ.ย.", "ธ.ค."]
@@ -50,13 +51,18 @@ def build_message():
     if not latest:
         sys.exit("latest.json not found - run fetch_prices.py first")
     today = latest["date"]
-    prices = [p for p in latest["prices"] if p["brand"] == BRAND]
-    if not prices:
-        sys.exit(f"No {BRAND} prices in latest.json - nothing to send")
-
-    lines = [f"⛽ ราคาน้ำมัน{BRAND} วันนี้", thai_date(today, weekday=True), ""]
-    for p in prices:
-        lines.append(f"• {p['product']}: {p['price']:.2f} บาท")
+    lines = ["⛽ ราคาน้ำมันวันนี้", thai_date(today, weekday=True)]
+    found = False
+    for brand, label in BRANDS:
+        prices = [p for p in latest["prices"] if p["brand"] == brand]
+        if not prices:
+            continue
+        found = True
+        lines += ["", f"🔹 {label}"]
+        for p in prices:
+            lines.append(f"• {p['product']}: {p['price']:.2f} บาท")
+    if not found:
+        sys.exit("No prices in latest.json - nothing to send")
 
     # --- tomorrow (officially announced by Bangchak) ---
     tmr = load("tomorrow.json")
@@ -64,7 +70,7 @@ def build_message():
     lines.append("")
     if tmr and tmr.get("for_date") == expected and tmr.get("items"):
         moved = [i for i in tmr["items"] if i.get("brand", BRAND) == BRAND and i["change"] != 0]
-        lines.append(f"📅 พรุ่งนี้ ({thai_date(expected)})")
+        lines.append(f"📅 พรุ่งนี้ ({thai_date(expected)}) ตามประกาศบางจาก")
         if moved:
             ups = sum(1 for i in moved if i["change"] > 0)
             lines.append("▲ ราคาขึ้น" if ups == len(moved) else
@@ -74,7 +80,7 @@ def build_message():
                 lines.append(f"• {i['product']}: {i['today']:.2f} → {i['tomorrow']:.2f} "
                              f"({sign}{i['change']:.2f})")
         else:
-            lines.append("ไม่มีการเปลี่ยนแปลงราคา (ตามที่บางจากประกาศ)")
+            lines.append("ไม่มีการเปลี่ยนแปลงราคา")
     else:
         lines.append("📅 พรุ่งนี้: ยังไม่มีประกาศราคา")
 
