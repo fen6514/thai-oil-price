@@ -1,6 +1,6 @@
 {
   "date": "2026-11-20",
-  "updated": "2026-11-20T06:53+07:00",
+  "updated": "2026-11-20T19:03+07:00",
   "prices": [
     {
       "brand": "PTT",
@@ -10,7 +10,7 @@
     {
       "brand": "PTT",
       "product": "Diesel",
-      "price": 39.99
+      "price": 39.94
     },
     {
       "brand": "PTT",
@@ -56,8 +56,8 @@
     {
       "brand": "Bangchak",
       "product": "Hi Diesel S",
-      "price": 39.99,
-      "tomorrow": 39.99
+      "price": 39.94,
+      "tomorrow": 39.94
     },
     {
       "brand": "Bangchak",
