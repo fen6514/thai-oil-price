@@ -51,7 +51,9 @@ def build_message():
     if not latest:
         sys.exit("latest.json not found - run fetch_prices.py first")
     today = latest["date"]
-    lines = ["⛽ ราคาน้ำมันวันนี้", thai_date(today, weekday=True)]
+    morning = datetime.now(BKK).hour < 12
+    title = "⛽ ราคาน้ำมันวันนี้ (รอบเช้า)" if morning else "⛽ ราคาน้ำมันวันนี้ (รอบเย็น)"
+    lines = [title, thai_date(today, weekday=True)]
     found = False
     for brand, label in BRANDS:
         prices = [p for p in latest["prices"] if p["brand"] == brand]
@@ -65,10 +67,14 @@ def build_message():
         sys.exit("No prices in latest.json - nothing to send")
 
     # --- tomorrow (officially announced by Bangchak) ---
+    # Bangchak announces changes in the evening, so the morning report skips this.
     tmr = load("tomorrow.json")
     expected = (datetime.strptime(today, "%Y-%m-%d") + timedelta(days=1)).strftime("%Y-%m-%d")
-    lines.append("")
-    if tmr and tmr.get("for_date") == expected and tmr.get("items"):
+    if not morning:
+        lines.append("")
+    if morning:
+        pass
+    elif tmr and tmr.get("for_date") == expected and tmr.get("items"):
         moved = [i for i in tmr["items"] if i.get("brand", BRAND) == BRAND and i["change"] != 0]
         lines.append(f"📅 พรุ่งนี้ ({thai_date(expected)}) ตามประกาศบางจาก")
         if moved:
