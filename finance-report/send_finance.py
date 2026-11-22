@@ -44,7 +44,8 @@ FX = [  # (Yahoo symbol, label, multiplier)
 
 FINANCE_NEWS = "https://news.google.com/rss/headlines/section/topic/BUSINESS?hl=th&gl=TH&ceid=TH:th"
 ECONOMY_NEWS = ("https://news.google.com/rss/search?q="
-                + urllib.parse.quote("เศรษฐกิจ when:1d") + "&hl=th&gl=TH&ceid=TH:th")
+                + urllib.parse.quote("เศรษฐกิจ when:1d -site:facebook.com") + "&hl=th&gl=TH&ceid=TH:th")
+MAX_TITLE = 140  # characters; longer headlines are cut with "…"
 
 
 def http(url, timeout=30):
@@ -61,7 +62,7 @@ def arrow(change, digits=2):
     if change is None:
         return ""
     if abs(change) < 10 ** -digits / 2:
-        return " (0)"
+        return " (คงที่)"
     return f" ({'▲ +' if change > 0 else '▼ '}{change:,.{digits}f})"
 
 
@@ -106,6 +107,10 @@ def news(url, n):
     for it in root.iter("item"):
         title = (it.findtext("title") or "").strip()
         link = (it.findtext("link") or "").strip()
+        if title.endswith("- Facebook"):
+            continue
+        if len(title) > MAX_TITLE:
+            title = title[:MAX_TITLE].rstrip() + "…"
         if title and link:
             items.append((title, link))
         if len(items) >= n:
@@ -129,7 +134,7 @@ def markets_text():
         lines += [f"ทองคำแท่ง  รับซื้อ {gold['bar_buy']:,.0f} | ขายออก {gold['bar_sell']:,.0f}",
                   f"ทองรูปพรรณ ขายออก {gold['orn_sell']:,.0f}"]
         if gold["when"]:
-            lines.append(f"(ประกาศ {gold['when']})")
+            lines.append(f"ประกาศ {gold['when']}")
     else:
         lines.append("ดึงราคาทองไทยไม่ได้วันนี้")
     if world:
