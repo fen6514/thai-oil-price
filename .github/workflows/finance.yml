@@ -1,0 +1,28 @@
+name: Finance daily report
+
+on:
+  schedule:
+    - cron: "27 2 * * *"   # 09:27 Bangkok time
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: "Preview only (don't send to LINE)"
+        type: boolean
+        default: false
+
+jobs:
+  report:
+    runs-on: ubuntu-latest
+    env:
+      FINANCE_LINE_TOKEN: ${{ secrets.FINANCE_LINE_TOKEN }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Preview report (no send)
+        if: inputs.dry_run
+        run: python finance-report/send_finance.py --dry-run
+      - name: Send LINE report
+        if: ${{ !inputs.dry_run }}
+        run: python finance-report/send_finance.py
