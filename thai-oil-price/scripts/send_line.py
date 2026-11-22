@@ -167,6 +167,8 @@ def oil_news():
             key = re.sub(r"\W", "", title)[:40]
             if not title or not link or key in seen or any(s in title for s in SKIP_DAILY):
                 continue
+            if "ราคาน้ำมัน" in title and "วันนี้" in title:  # other "today's price" lists
+                continue
             if not any(w.lower() in title.lower() for w in OIL_WORDS):  # e.g. gold news tagged "oil"
                 continue
             try:
