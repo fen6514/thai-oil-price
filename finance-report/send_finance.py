@@ -4,9 +4,9 @@ Daily finance report for the "Thai Finance Daily" LINE Official Account.
 Collects:
   - Thai gold prices (Gold Traders Association, goldtraders.or.th) + world gold
   - Exchange rates (baht per USD/EUR/GBP/100 JPY/CNY) + SET index (Yahoo Finance)
-  - Finance news and economic news: Claude reads the past day's articles
-    (Prachachat full text + Kaohoon excerpts) and writes short Thai summaries.
-    Without an API key (or if that fails) it falls back to Google News headlines.
+  - Finance news and economic news from Prachachat + Kaohoon, each with the
+    article's opening lines (free). If an ANTHROPIC_API_KEY secret is ever added,
+    Claude writes the summaries instead. Last resort: Google News headlines.
 and BROADCASTS them to every friend of the LINE account.
 
 Needs the `anthropic` package for the summaries (pip install anthropic).
@@ -177,9 +177,53 @@ def fetch_articles():
                 continue
             seen.add(link)
             taken += 1
-            articles.append({"source": source, "title": title, "link": link,
-                             "categories": cats[:4], "text": text[:ARTICLE_CHARS]})
+            articles.append({"source": source, "title": title, "link": link, "feed": url,
+                             "categories": cats[:4], "text": text[:ARTICLE_CHARS],
+                             "excerpt": excerpt(it.findtext("description"))})
     return articles
+
+
+EXCERPT_CHARS = 220
+
+
+def excerpt(desc_html):
+    """The article's opening paragraph from the feed, shortened to ~2 sentences."""
+    first = re.search(r"<p>([\s\S]*?)</p>", desc_html or "")
+    text = plain_text(first.group(1) if first else desc_html)
+    text = re.sub(r"\s*(…|\.\.\.|\[…\])\s*$", "", text).strip()
+    if len(text) > EXCERPT_CHARS:
+        cut = text[:EXCERPT_CHARS]
+        text = (cut[:cut.rfind(" ")] if " " in cut[100:] else cut).rstrip() + "…"
+    return text
+
+
+def is_economy(article):
+    return any(c.startswith(("Economic", "เศรษฐกิจ", "World")) for c in article["categories"])
+
+
+def excerpt_news_texts():
+    """Free mode: two LINE texts with each article's opening lines, or None."""
+    articles = [a for a in safe(fetch_articles) or [] if a["excerpt"]]
+    fin_feeds = [a for a in articles if not a["feed"].endswith("prachachat.net/feed")]
+    # mix Prachachat finance and Kaohoon so both sources appear
+    pp = [a for a in fin_feeds if "prachachat" in a["feed"]]
+    kh = [a for a in fin_feeds if "kaohoon" in a["feed"]]
+    finance = [a for pair in zip(pp, kh) for a in pair] + pp[len(kh):] + kh[len(pp):]
+    general = [a for a in articles if a["feed"].endswith("prachachat.net/feed")]
+    economy = [a for a in general if is_economy(a)] + [a for a in general if not is_economy(a)]
+
+    def section(title, items):
+        if not items:
+            return None
+        lines = [title]
+        for i, a in enumerate(items[:NEWS_PER_SECTION], 1):
+            lines += ["", f"{i}. {a['title'][:MAX_TITLE]}", f"📝 {a['excerpt']}",
+                      f"({a['source']}) {a['link']}"]
+        return "\n".join(lines)
+
+    texts = [t for t in (section("📰 ข่าวการเงิน / ธุรกิจ", finance),
+                         section("🏛️ ข่าวเศรษฐกิจ", economy)) if t]
+    return texts or None
 
 
 SUMMARY_PROMPT = """คุณคือบรรณาธิการข่าวเศรษฐกิจที่เขียนสรุปข่าวเช้าให้คนไทยทั่วไปอ่านใน LINE
@@ -349,10 +393,13 @@ def news_text(title, url, seen):
 
 def build_messages():
     texts = [markets_text()]
-    news_texts = ai_news_texts()
+    # 1) Claude summaries (only if an ANTHROPIC_API_KEY secret exists)
+    # 2) free: each article's opening lines from the news feeds
+    # 3) last resort: Google News headlines
+    news_texts = ai_news_texts() or excerpt_news_texts()
     if news_texts:
         texts += news_texts
-    else:  # fallback: headlines only
+    else:
         seen = set()
         texts += [news_text("📰 ข่าวการเงิน / ธุรกิจ", FINANCE_NEWS, seen),
                   news_text("🏛️ ข่าวเศรษฐกิจ", ECONOMY_NEWS, seen)]
