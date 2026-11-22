@@ -5,6 +5,11 @@ on:
     - cron: "17 23 * * *"
     - cron: "17 11 * * *"
   workflow_dispatch:
+    inputs:
+      preview:
+        description: "Preview the evening LINE report only (don't send)"
+        type: boolean
+        default: false
 
 permissions:
   contents: write
@@ -31,4 +36,4 @@ jobs:
           git push
       - name: Send LINE report
         if: env.LINE_TOKEN != ''
-        run: python thai-oil-price/scripts/send_line.py
+        run: python thai-oil-price/scripts/send_line.py ${{ inputs.preview && '--dry-run --evening' || '' }}
