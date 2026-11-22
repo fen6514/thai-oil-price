@@ -54,7 +54,7 @@ MAX_TITLE = 140  # characters; longer headlines are cut with "…"
 ARTICLE_FEEDS = [  # (source name, feed URL, max articles taken from it)
     ("ประชาชาติธุรกิจ", "https://www.prachachat.net/finance/feed", 6),
     ("ข่าวหุ้น", "https://www.kaohoon.com/feed", 6),
-    ("ประชาชาติธุรกิจ", "https://www.prachachat.net/feed", 12),
+    ("ประชาชาติธุรกิจ", "https://www.prachachat.net/feed", 20),
 ]
 ECONOMY_CATEGORIES = ("Economic", "Finance", "Business", "World", "Real Estate", "เศรษฐกิจ")
 ARTICLE_HOURS = 30        # only articles from roughly the last day
@@ -175,6 +175,10 @@ def fetch_articles():
             if url.endswith("prachachat.net/feed") and not any(
                     c.startswith(ECONOMY_CATEGORIES) for c in cats):
                 continue
+            # Kaohoon also posts weather/crime/general news - keep market stories only
+            if "kaohoon" in url and ("ข่าวทั่วไป" in cats or not any(
+                    c.startswith("เศรษฐกิจ") or c == "บริษัทจดทะเบียน" for c in cats)):
+                continue
             seen.add(link)
             taken += 1
             articles.append({"source": source, "title": title, "link": link, "feed": url,
@@ -197,8 +201,16 @@ def excerpt(desc_html):
     return text
 
 
-def is_economy(article):
-    return any(c.startswith(("Economic", "เศรษฐกิจ", "World")) for c in article["categories"])
+def economy_rank(article):
+    """0 = national economy, 1 = world, 2 = regional Thai economy, 3 = other business."""
+    cats = article["categories"]
+    if "Economic" in cats:
+        return 0
+    if "World" in cats:
+        return 1
+    if any(c.startswith("เศรษฐกิจ") for c in cats):
+        return 2
+    return 3
 
 
 def excerpt_news_texts():
@@ -210,7 +222,7 @@ def excerpt_news_texts():
     kh = [a for a in fin_feeds if "kaohoon" in a["feed"]]
     finance = [a for pair in zip(pp, kh) for a in pair] + pp[len(kh):] + kh[len(pp):]
     general = [a for a in articles if a["feed"].endswith("prachachat.net/feed")]
-    economy = [a for a in general if is_economy(a)] + [a for a in general if not is_economy(a)]
+    economy = sorted(general, key=economy_rank)  # stable: newest first within each group
 
     def section(title, items):
         if not items:
@@ -260,7 +272,7 @@ SUMMARY_SCHEMA = {
 def ai_news_texts():
     """Two LINE texts (finance, economy) with Claude summaries, or None to fall back."""
     if not os.environ.get("ANTHROPIC_API_KEY", "").strip():
-        print("ANTHROPIC_API_KEY not set - using headline-only news", file=sys.stderr)
+        print("ANTHROPIC_API_KEY not set - using the free article excerpts", file=sys.stderr)
         return None
     try:
         import anthropic
