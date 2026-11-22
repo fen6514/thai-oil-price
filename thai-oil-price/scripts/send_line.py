@@ -128,7 +128,10 @@ GOOGLE_NEWS = ("https://news.google.com/rss/search?q="
                + urllib.parse.quote("ราคาน้ำมัน when:2d") + "&hl=th&gl=TH&ceid=TH:th")
 NEWS_COUNT = 5
 NEWS_DAYS = 3             # only news from the last few days
-SKIP_DAILY = ("ราคาน้ำมันวันนี้", "เช็กราคาน้ำมัน", "อัปเดตราคาน้ำมัน")  # daily price posts
+SKIP_DAILY = ("ราคาน้ำมันวันนี้", "เช็กราคาน้ำมัน", "อัปเดตราคาน้ำมัน",  # daily price posts
+              "ราคาน้ำมันประจำวัน", "ราคาน้ำมันล่าสุดวันนี้")
+OIL_WORDS = ("น้ำมัน", "ดีเซล", "เบนซิน", "แก๊สโซฮอล์", "โซฮอล์", "WTI", "เบรนท์", "Brent",
+             "โอเปก", "OPEC", "LPG", "NGV", "กองทุนน้ำมัน", "โรงกลั่น", "ปั๊ม")
 
 
 def http_get(url):
@@ -163,6 +166,8 @@ def oil_news():
             link = (it.findtext("link") or "").strip()
             key = re.sub(r"\W", "", title)[:40]
             if not title or not link or key in seen or any(s in title for s in SKIP_DAILY):
+                continue
+            if not any(w.lower() in title.lower() for w in OIL_WORDS):  # e.g. gold news tagged "oil"
                 continue
             try:
                 when = parsedate_to_datetime(it.findtext("pubDate"))
