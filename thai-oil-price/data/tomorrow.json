@@ -1,19 +1,19 @@
 {
-  "for_date": "2026-11-25",
-  "checked": "2026-11-24T19:04+07:00",
+  "for_date": "2026-11-26",
+  "checked": "2026-11-25T06:56+07:00",
   "items": [
     {
       "brand": "Bangchak",
       "product": "DIESEL B20",
-      "today": 33.5,
-      "tomorrow": 33.5,
+      "today": 32.9,
+      "tomorrow": 32.9,
       "change": 0.0
     },
     {
       "brand": "Bangchak",
       "product": "Hi Diesel S",
-      "today": 39.94,
-      "tomorrow": 39.94,
+      "today": 39.34,
+      "tomorrow": 39.34,
       "change": 0.0
     },
     {

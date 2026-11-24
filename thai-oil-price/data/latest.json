@@ -1,16 +1,16 @@
 {
-  "date": "2026-11-24",
-  "updated": "2026-11-24T19:04+07:00",
+  "date": "2026-11-25",
+  "updated": "2026-11-25T06:56+07:00",
   "prices": [
     {
       "brand": "PTT",
       "product": "Diesel B20",
-      "price": 33.5
+      "price": 32.9
     },
     {
       "brand": "PTT",
       "product": "Diesel",
-      "price": 39.94
+      "price": 39.34
     },
     {
       "brand": "PTT",
@@ -50,14 +50,14 @@
     {
       "brand": "Bangchak",
       "product": "DIESEL B20",
-      "price": 33.5,
-      "tomorrow": 33.5
+      "price": 32.9,
+      "tomorrow": 32.9
     },
     {
       "brand": "Bangchak",
       "product": "Hi Diesel S",
-      "price": 39.94,
-      "tomorrow": 39.94
+      "price": 39.34,
+      "tomorrow": 39.34
     },
     {
       "brand": "Bangchak",
