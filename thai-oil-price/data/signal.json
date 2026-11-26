@@ -1,9 +1,9 @@
 {
   "direction": "flat",
-  "change_pct": -0.7,
+  "change_pct": -0.92,
   "threshold_pct": 2.0,
-  "from": "2026-11-18",
-  "to": "2026-11-25",
-  "brent_usd": 90.7,
-  "usdthb": 34.02
+  "from": "2026-11-19",
+  "to": "2026-11-26",
+  "brent_usd": 90.87,
+  "usdthb": 34.04
 }
