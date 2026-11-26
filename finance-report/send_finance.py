@@ -14,14 +14,24 @@ Secrets (GitHub secrets - never put them in this file):
   FINANCE_LINE_TOKEN  - LINE channel access token
   ANTHROPIC_API_KEY   - Claude API key (optional; enables the summaries)
 
-Test without sending:  python finance-report/send_finance.py --dry-run
+Pictures (gold graph, exchange-rate table, world stock-index table) are saved in
+finance-report/charts/ and LINE loads them from the public GitHub repo.
+
+How the workflow runs it:
+  python finance-report/send_finance.py --prepare   # fetch data, draw pictures, save outbox.json
+  (workflow commits + pushes the pictures so their links work)
+  python finance-report/send_finance.py --send      # broadcast outbox.json to LINE
+Test without anything:  python finance-report/send_finance.py --dry-run
 """
 
+import csv
 import html
 import json
 import os
 import re
+import shutil
 import sys
+from pathlib import Path
 import urllib.error
 import urllib.parse
 import urllib.request
@@ -44,6 +54,34 @@ FX = [  # (Yahoo symbol, label, multiplier)
     ("JPYTHB=X", "JPY (100 เยน)", 100),
     ("CNYTHB=X", "CNY", 1),
 ]
+FX_TABLE = [  # (label in picture, Yahoo symbol, multiplier); CNY is worked out from USD
+    ("USD  US dollar", "THB=X", 1),
+    ("EUR  Euro", "EURTHB=X", 1),
+    ("GBP  British pound", "GBPTHB=X", 1),
+    ("JPY  Japanese yen (100)", "JPYTHB=X", 100),
+    ("CNY  Chinese yuan", "CNY", 1),
+]
+INDICES = [  # (name, market, Yahoo symbol)
+    ("S&P 500", "USA", "^GSPC"),
+    ("Dow Jones", "USA", "^DJI"),
+    ("Nasdaq", "USA", "^IXIC"),
+    ("FTSE 100", "UK", "^FTSE"),
+    ("DAX", "Germany", "^GDAXI"),
+    ("Nikkei 225", "Japan", "^N225"),
+    ("Hang Seng", "Hong Kong", "^HSI"),
+    ("Shanghai Composite", "China", "000001.SS"),
+    ("KOSPI", "South Korea", "^KS11"),
+    ("STI", "Singapore", "^STI"),
+    ("SET", "Thailand", "^SET.BK"),
+]
+HERE = Path(__file__).resolve().parent
+CHARTS_DIR = HERE / "charts"
+HISTORY = HERE / "data" / "history.csv"
+OUTBOX = HERE / "outbox.json"
+KEEP_CHART_DAYS = 14
+REPO = os.environ.get("GITHUB_REPOSITORY", "fen6514/thai-oil-price")
+BRANCH = os.environ.get("GITHUB_REF_NAME", "main")
+GOLD_HISTORY_MIN = 10  # Thai gold days needed before the graph switches to Thai prices
 
 FINANCE_NEWS = "https://news.google.com/rss/headlines/section/topic/BUSINESS?hl=th&gl=TH&ceid=TH:th"
 ECONOMY_NEWS = ("https://news.google.com/rss/search?q="
@@ -112,6 +150,201 @@ def safe(fn, *args):
     except Exception as e:  # one broken source must not stop the whole report
         print(f"skipped {fn.__name__}{args}: {e}", file=sys.stderr)
         return None
+
+
+# ---------- 1-month history ----------
+def yahoo_series(symbol):
+    """Daily closes for about the last month: [(date, close)], oldest first."""
+    url = f"https://query1.finance.yahoo.com/v8/finance/chart/{urllib.parse.quote(symbol)}?range=1mo&interval=1d"
+    res = json.loads(http(url))["chart"]["result"][0]
+    by_day = {}
+    for ts, c in zip(res.get("timestamp") or [], res["indicators"]["quote"][0]["close"]):
+        if c is not None:
+            by_day[datetime.fromtimestamp(ts, BKK).date()] = c
+    if not by_day:
+        price = res["meta"].get("regularMarketPrice")
+        if price is None:
+            raise ValueError(f"no data for {symbol}")
+        by_day[datetime.now(BKK).date()] = price
+    return sorted(by_day.items())
+
+
+def cny_series():
+    """Baht per yuan = (baht per dollar) / (yuan per dollar)."""
+    usd = dict(yahoo_series("THB=X"))
+    cny = yahoo_series("CNY=X")
+    out, last_cny = [], None
+    cny_by_day = dict(cny)
+    for d in sorted(usd):
+        last_cny = cny_by_day.get(d, last_cny)
+        if last_cny:
+            out.append((d, usd[d] / last_cny))
+    return out
+
+
+def value_on_or_before(series, day):
+    """Last value at or before `day` (series oldest first); None if nothing that early."""
+    found = None
+    for d, v in series:
+        if d <= day:
+            found = v
+        else:
+            break
+    return found
+
+
+def pct_change(new, old):
+    return (new / old - 1) * 100 if new is not None and old else None
+
+
+def read_history():
+    if not HISTORY.exists():
+        return []
+    with HISTORY.open(newline="", encoding="utf-8") as f:
+        return list(csv.DictReader(f))
+
+
+def save_history(gold, set_value):
+    """Keep one row per day of the Thai gold price and SET (Yahoo has no history for these)."""
+    fields = ["date", "gold_bar_buy", "gold_bar_sell", "gold_orn_sell", "set"]
+    today = datetime.now(BKK).strftime("%Y-%m-%d")
+    rows = [r for r in read_history() if r.get("date") != today]
+    rows.append({"date": today,
+                 "gold_bar_buy": gold["bar_buy"] if gold else "",
+                 "gold_bar_sell": gold["bar_sell"] if gold else "",
+                 "gold_orn_sell": gold["orn_sell"] if gold else "",
+                 "set": round(set_value, 2) if set_value else ""})
+    HISTORY.parent.mkdir(exist_ok=True)
+    with HISTORY.open("w", newline="", encoding="utf-8") as f:
+        w = csv.DictWriter(f, fieldnames=fields)
+        w.writeheader()
+        w.writerows(sorted(rows, key=lambda r: r["date"]))
+
+
+def history_series(column):
+    out = []
+    for r in read_history():
+        try:
+            out.append((datetime.strptime(r["date"], "%Y-%m-%d").date(), float(r[column])))
+        except (KeyError, ValueError):
+            continue
+    return out
+
+
+# ---------- pictures ----------
+def chart_folder():
+    """Today's picture folder; old folders are removed so the repo stays small."""
+    now = datetime.now(BKK)
+    CHARTS_DIR.mkdir(exist_ok=True)
+    cutoff = (now - timedelta(days=KEEP_CHART_DAYS)).strftime("%Y-%m-%d")
+    for old in CHARTS_DIR.iterdir():
+        if old.is_dir() and old.name < cutoff:
+            shutil.rmtree(old, ignore_errors=True)
+    folder = CHARTS_DIR / now.strftime("%Y-%m-%d")
+    folder.mkdir(exist_ok=True)
+    return folder, now.strftime("%H%M")
+
+
+def public_url(path):
+    rel = path.relative_to(HERE.parent).as_posix()
+    return f"https://raw.githubusercontent.com/{REPO}/{BRANCH}/{rel}"
+
+
+def short_date(d):
+    return d.strftime("%d %b")
+
+
+def fx_picture(path):
+    import charts
+    today = datetime.now(BKK).date()
+    offsets = [0, 7, 14, 21, 30]
+    days = [today - timedelta(days=o) for o in offsets]
+    header = ["Currency (baht)"] + [
+        "Today" if o == 0 else f"{o // 7} wk ago\n{short_date(d)}" if o < 30 else f"1 month ago\n{short_date(d)}"
+        for o, d in zip(offsets, days)] + ["1-month\nchange"]
+    rows = []
+    for label, symbol, mult in FX_TABLE:
+        series = safe(cny_series) if symbol == "CNY" else safe(yahoo_series, symbol)
+        if not series:
+            continue
+        vals = [value_on_or_before(series, d) for d in days]
+        vals[0] = series[-1][1]
+        vals = [v * mult if v is not None else None for v in vals]
+        change = pct_change(vals[0], vals[-1])
+        rows.append([label] + [f"{v:,.2f}" if v is not None else "-" for v in vals]
+                    + [(charts.fmt_pct(change), charts.change_color(change))])
+    if not rows:
+        raise ValueError("no exchange-rate data")
+    charts.table_image(
+        path, "Exchange rates - last month",
+        f"Thai baht per 1 unit (JPY per 100 yen)  |  {today.strftime('%d %b %Y')}",
+        header, rows, [3.1, 1.25, 1.35, 1.35, 1.35, 1.55, 1.6],
+        footnote="Source: Yahoo Finance (market rates; bank buy/sell rates differ).  ▲ = currency got stronger vs baht")
+
+
+def indices_picture(path):
+    import charts
+    today = datetime.now(BKK).date()
+    rows = []
+    set_hist = history_series("set")
+    for name, market, symbol in INDICES:
+        series = safe(yahoo_series, symbol)
+        if not series:
+            continue
+        last = series[-1][1]
+        if len(series) < 3 and symbol == "^SET.BK" and set_hist:
+            series = [s for s in set_hist if s[0] < series[-1][0]] + series[-1:]
+        day = pct_change(last, series[-2][1]) if len(series) > 1 else None
+        month_ago = value_on_or_before(series, today - timedelta(days=30))
+        month = pct_change(last, month_ago) if len(series) > 5 and month_ago else None
+        rows.append([name, (market, charts.MUTED), f"{last:,.2f}",
+                     (charts.fmt_pct(day), charts.change_color(day)),
+                     (charts.fmt_pct(month), charts.change_color(month))])
+    if not rows:
+        raise ValueError("no index data")
+    charts.table_image(
+        path, "World stock markets",
+        f"Latest close  |  {today.strftime('%d %b %Y')}",
+        ["Index", "Market", "Last", "1-day", "1-month"], rows, [2.6, 1.7, 1.8, 1.45, 1.45],
+        footnote="Source: Yahoo Finance. Asian markets may already show today's session; US/Europe show last night's close.")
+
+
+def gold_picture(path, gold):
+    import charts
+    thai = history_series("gold_bar_sell")
+    if len(thai) >= GOLD_HISTORY_MIN:
+        charts.line_chart(path, "Thai gold bar price - last month",
+                          "Gold Traders Association, 96.5% gold bar, sell price (baht per baht-weight)",
+                          thai[-31:], "{:,.0f}", footnote="Source: goldtraders.or.th (saved daily by this bot)")
+        return
+    world = yahoo_series("GC=F")
+    today_thai = (f"Thai gold bar today: buy {gold['bar_buy']:,.0f} / sell {gold['bar_sell']:,.0f} baht"
+                  if gold else "")
+    charts.line_chart(path, "World gold price - last month", "US dollars per troy ounce (Gold futures)",
+                      world, "{:,.0f}",
+                      footnote=(today_thai + "   |   " if today_thai else "") + "Source: Yahoo Finance")
+
+
+def make_pictures(gold):
+    """Draw the 3 pictures. Returns {"gold"/"fx"/"indices": public URL} for the ones that worked."""
+    sys.path.insert(0, str(HERE))
+    try:
+        import charts  # noqa: F401  (needs matplotlib)
+    except ImportError as e:
+        print(f"pictures skipped (matplotlib missing): {e}", file=sys.stderr)
+        return {}
+    folder, stamp = chart_folder()
+    urls = {}
+    for key, draw in (("gold", lambda p: gold_picture(p, gold)), ("fx", fx_picture),
+                      ("indices", indices_picture)):
+        path = folder / f"{stamp}-{key}.png"
+        try:
+            draw(path)
+            urls[key] = public_url(path)
+            print(f"picture saved: {path.relative_to(HERE.parent)}")
+        except Exception as e:
+            print(f"picture '{key}' skipped: {e}", file=sys.stderr)
+    return urls
 
 
 # ---------- news ----------
@@ -353,6 +586,32 @@ def thai_today():
     return f"วัน{TH_DAYS[d.weekday()]}ที่ {d.day} {TH_MONTHS[d.month - 1]} {d.year + 543}"
 
 
+def summary_text(gold, pictures, set_value):
+    """First bubble when pictures are used: Thai gold today + what the pictures show."""
+    lines = ["💰 สรุปการเงินประจำวัน", thai_today(), "", "🥇 ราคาทอง (สมาคมค้าทองคำ, บาทละ)"]
+    if gold:
+        lines += [f"ทองคำแท่ง  รับซื้อ {gold['bar_buy']:,.0f} | ขายออก {gold['bar_sell']:,.0f}",
+                  f"ทองรูปพรรณ ขายออก {gold['orn_sell']:,.0f}"]
+        if gold["when"]:
+            lines.append(f"ประกาศ {gold['when']}")
+    else:
+        lines.append("ดึงราคาทองไทยไม่ได้วันนี้")
+    if set_value:
+        lines += ["", f"📊 SET Index: {set_value:,.2f}"]
+    shown = [t for k, t in (("gold", "กราฟราคาทอง 1 เดือน"), ("fx", "ตารางอัตราแลกเปลี่ยนย้อนหลัง 1 เดือน"),
+                            ("indices", "ดัชนีหุ้นทั่วโลก")) if k in pictures]
+    if shown:
+        lines += ["", "👇 " + " · ".join(shown)]
+    if "fx" not in pictures:  # picture failed - keep the rates as text
+        lines += ["", "💱 อัตราแลกเปลี่ยน (บาท)"]
+        for symbol, label, mult in FX:
+            q = safe(yahoo, symbol)
+            if q:
+                last, prev = q[0] * mult, (q[1] * mult if q[1] else None)
+                lines.append(f"• {label}: {last:,.2f}{arrow(last - prev if prev else None)}")
+    return "\n".join(lines)
+
+
 def markets_text():
     lines = ["💰 สรุปการเงินประจำวัน", thai_today()]
 
@@ -403,23 +662,65 @@ def news_text(title, url, seen):
     return "\n".join(lines)
 
 
-def build_messages():
-    texts = [markets_text()]
+def news_texts():
     # 1) Claude summaries (only if an ANTHROPIC_API_KEY secret exists)
     # 2) free: each article's opening lines from the news feeds
     # 3) last resort: Google News headlines
-    news_texts = ai_news_texts() or excerpt_news_texts()
-    if news_texts:
-        texts += news_texts
-    else:
+    texts = ai_news_texts() or excerpt_news_texts()
+    if not texts:
         seen = set()
-        texts += [news_text("📰 ข่าวการเงิน / ธุรกิจ", FINANCE_NEWS, seen),
-                  news_text("🏛️ ข่าวเศรษฐกิจ", ECONOMY_NEWS, seen)]
-    return [t[:4900] for t in texts if t]
+        texts = [news_text("📰 ข่าวการเงิน / ธุรกิจ", FINANCE_NEWS, seen),
+                 news_text("🏛️ ข่าวเศรษฐกิจ", ECONOMY_NEWS, seen)]
+    return [t for t in texts if t]
 
 
-def broadcast(texts, token):
-    body = json.dumps({"messages": [{"type": "text", "text": t} for t in texts]}).encode("utf-8")
+def join_limited(texts, limit=4900):
+    """Merge texts into one LINE bubble; drop whole trailing stories if it gets too long."""
+    joined = "\n\n━━━━━━━━━━\n\n".join(texts)
+    while len(joined) > limit:
+        cut = joined.rfind("\n\n", 0, limit)
+        if cut <= 0:
+            break
+        joined = joined[:cut]
+    return joined[:limit]
+
+
+def text_msg(t):
+    return {"type": "text", "text": t[:4900]}
+
+
+def image_msg(url):
+    return {"type": "image", "originalContentUrl": url, "previewImageUrl": url}
+
+
+def build_messages(with_pictures=True):
+    """LINE allows at most 5 bubbles per message: summary + 3 pictures + news."""
+    if not with_pictures:
+        return [text_msg(t) for t in [markets_text()] + news_texts()]
+    gold = safe(thai_gold)
+    set_q = safe(yahoo, "^SET.BK")
+    set_value = set_q[0] if set_q else None
+    safe(save_history, gold, set_value)
+    pictures = make_pictures(gold)
+    msgs = [text_msg(summary_text(gold, pictures, set_value))]
+    msgs += [image_msg(pictures[k]) for k in ("gold", "fx", "indices") if k in pictures]
+    news = news_texts()
+    room = 5 - len(msgs)
+    if news and room >= len(news):
+        msgs += [text_msg(t) for t in news]
+    elif news:
+        msgs.append(text_msg(join_limited(news)))
+    return msgs
+
+
+def describe(msgs):
+    for m in msgs:
+        print(m["text"] if m["type"] == "text" else f"[picture] {m['originalContentUrl']}")
+        print("-" * 30)
+
+
+def broadcast(msgs, token):
+    body = json.dumps({"messages": msgs}).encode("utf-8")
     req = urllib.request.Request(
         BROADCAST_URL, data=body, method="POST",
         headers={"Content-Type": "application/json", "Authorization": f"Bearer {token}"},
@@ -435,17 +736,20 @@ def broadcast(texts, token):
 
 
 def main():
-    texts = build_messages()
-    for t in texts:
-        print(t)
-        print("-" * 30)
-    if "--dry-run" in sys.argv:
-        print("Dry run - nothing sent.")
+    if "--send" in sys.argv:  # step 2: pictures are pushed, now send what --prepare saved
+        msgs = json.loads(OUTBOX.read_text(encoding="utf-8"))
+    else:
+        msgs = build_messages(with_pictures="--no-pictures" not in sys.argv)
+        if "--prepare" in sys.argv:
+            OUTBOX.write_text(json.dumps(msgs, ensure_ascii=False, indent=1), encoding="utf-8")
+    describe(msgs)
+    if "--dry-run" in sys.argv or "--prepare" in sys.argv:
+        print("Not sent (prepare / dry run).")
         return
     token = os.environ.get("FINANCE_LINE_TOKEN", "").strip()
     if not token:
         sys.exit("FINANCE_LINE_TOKEN is not set - add it in GitHub: Settings -> Secrets and variables -> Actions")
-    broadcast(texts, token)
+    broadcast(msgs, token)
 
 
 if __name__ == "__main__":
