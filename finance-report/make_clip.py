@@ -290,13 +290,10 @@ def run(cmd):
     subprocess.run(cmd, check=True, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE)
 
 
-VOICES = [  # tried in order; the first one that works is used for the whole clip
-    ("edge", VOICE, RATE),
-    ("edge", VOICE, "+0%"),
-    ("edge", "th-TH-NiwatNeural", "+0%"),
-    ("google", "th", None),
+VOICES = [  # tried in order; ONE voice is used for the whole clip
+    ("edge", VOICE, RATE),          # Microsoft neural voice (natural, but sometimes flaky)
+    ("google", "th", None),         # Google Translate voice (plainer, reliable backup)
 ]
-_voice = []
 
 
 def _say(engine, voice, rate, text, path):
@@ -310,20 +307,29 @@ def _say(engine, voice, rate, text, path):
         raise RuntimeError("no audio")
 
 
-def speak(text, path):
-    """Same voice for the whole clip: the first working one is remembered."""
-    choices = _voice or VOICES
-    for engine, voice, rate in choices:
-        for attempt in range(2):
-            try:
-                _say(engine, voice, rate, text, path)
-                if not _voice:
-                    _voice.append((engine, voice, rate))
-                    print(f"voice used: {engine} {voice} {rate or ''}")
-                return
-            except Exception as e:
-                print(f"voice {engine}/{voice} attempt {attempt + 1} failed: {e}", file=sys.stderr)
-    raise RuntimeError("text-to-speech failed")
+def speak_all(texts, paths):
+    """Record every sentence with the same voice. If a voice keeps failing (after
+    waiting and retrying), start again with the next voice so the clip never mixes voices."""
+    import time
+    for engine, voice, rate in VOICES:
+        try:
+            for text, path in zip(texts, paths):
+                for attempt in range(5):
+                    try:
+                        _say(engine, voice, rate, text, path)
+                        break
+                    except Exception as e:
+                        print(f"voice {engine} attempt {attempt + 1} failed on '{text}': {e}",
+                              file=sys.stderr)
+                        if attempt == 4:
+                            raise
+                        time.sleep(3 * (attempt + 1))
+                time.sleep(0.5)  # be gentle with the free service
+            print(f"voice used: {engine} {voice} {rate or ''}")
+            return
+        except Exception:
+            print(f"voice {engine} gave up - trying the next voice", file=sys.stderr)
+    raise RuntimeError("text-to-speech failed with every voice")
 
 
 def duration(path):
@@ -336,11 +342,11 @@ def build_clip(scenes):
     from PIL import features
     print("Thai text shaping (raqm):", features.check_feature("raqm"))
     steps = [(s, cap, sp) for s in scenes for cap, sp in s["lines"]]
+    speak_all([sp for _, _, sp in steps], [WORK / f"v{n:02d}.mp3" for n in range(len(steps))])
     segments = []
     for n, (scene, caption, speech) in enumerate(steps):
         png, mp3, mp4 = WORK / f"f{n:02d}.png", WORK / f"v{n:02d}.mp3", WORK / f"s{n:02d}.mp4"
         frame(png, scene, caption, (n + 1) / len(steps), scene.get("big"))
-        speak(speech, mp3)
         length = duration(mp3) + PAUSE
         run(["ffmpeg", "-y", "-loop", "1", "-framerate", "30", "-i", str(png), "-i", str(mp3),
              "-filter_complex", f"[1:a]apad=pad_dur={PAUSE}[a]", "-map", "0:v", "-map", "[a]",
