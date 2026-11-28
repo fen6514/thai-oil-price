@@ -53,14 +53,20 @@ TEXT_RIGHT = 900     # keep text clear of TikTok's buttons on the right
 
 
 # ---------- fonts ----------
+FONT_DIR = HERE / "fonts"  # the workflow downloads Kanit (Thai + English + numbers) here
+
+
 def find_font(bold):
-    pats = (["NotoSansThai-Bold.ttf", "NotoSansThai*Bold*.ttf", "Loma-Bold.ttf", "*Thai*Bold*.ttf"] if bold
-            else ["NotoSansThai-Regular.ttf", "NotoSansThai*.ttf", "Loma.ttf", "*Thai*.ttf"])
+    # Kanit first; Loma (fonts-thai-tlwg) also has English letters and numbers.
+    # (Noto Sans Thai has NO English letters/numbers - they show as boxes.)
+    pats = (["Kanit-SemiBold.ttf", "Kanit-Bold.ttf", "Loma-Bold.ttf"] if bold
+            else ["Kanit-Regular.ttf", "Kanit-Light.ttf", "Loma.ttf"])
     for p in pats:
-        hits = sorted(glob.glob(f"/usr/share/fonts/**/{p}", recursive=True))
+        hits = sorted(glob.glob(str(FONT_DIR / p))) + sorted(
+            glob.glob(f"/usr/share/fonts/**/{p}", recursive=True))
         if hits:
             return hits[0]
-    sys.exit("No Thai font found - the workflow installs fonts-noto-core")
+    sys.exit("No Thai font found - the workflow downloads Kanit into finance-report/fonts")
 
 
 _fonts = {}
@@ -367,6 +373,13 @@ def build_clip(scenes):
          "-movflags", "+faststart", str(clip)])
     from PIL import Image
     Image.open(WORK / "f00.png").convert("RGB").save(OUT / "cover.jpg", quality=85)
+    # contact sheet of every frame, to check the clip by eye without playing it
+    cols, tw, th = 5, 270, 480
+    frames = sorted(WORK.glob("f*.png"))
+    sheet = Image.new("RGB", (cols * tw, -(-len(frames) // cols) * th), (0, 0, 0))
+    for i, p in enumerate(frames):
+        sheet.paste(Image.open(p).convert("RGB").resize((tw, th)), ((i % cols) * tw, (i // cols) * th))
+    sheet.save(OUT / "frames.jpg", quality=85)
     print(f"clip saved: {clip} ({duration(clip):.0f} s, {clip.stat().st_size / 1e6:.1f} MB)")
 
 
