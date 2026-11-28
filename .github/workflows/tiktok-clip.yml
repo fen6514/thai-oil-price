@@ -45,12 +45,12 @@ jobs:
             finance-report/clip-out/caption.txt
           retention-days: 7
       - name: Put today's clip on the "clips" branch (only the latest clip is kept)
-        if: ${{ !inputs.preview }}
         run: |
           cd finance-report/clip-out
           VIDEO=$(python -c "import json;print(json.load(open('meta.json'))['video'])")
           COVER=$(python -c "import json;print(json.load(open('meta.json'))['cover'])")
           mkdir publish && cp clip.mp4 "publish/$VIDEO" && cp cover.jpg "publish/$COVER"
+          cp clip.mp4 publish/latest.mp4 && cp caption.txt publish/caption.txt
           cd publish
           git init -q -b clips
           git config user.name "tiktok-clip-bot"
