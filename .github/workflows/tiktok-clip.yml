@@ -31,7 +31,11 @@ jobs:
       - name: Install video tools, Thai fonts and libraries
         run: |
           sudo apt-get update -qq
-          sudo apt-get install -y -qq ffmpeg fonts-noto-core fonts-thai-tlwg libraqm0 libfribidi0 > /dev/null
+          sudo apt-get install -y -qq ffmpeg fonts-thai-tlwg libraqm0 libfribidi0 > /dev/null
+          mkdir -p finance-report/fonts
+          for f in Kanit-SemiBold Kanit-Regular; do
+            curl -sSfL -o "finance-report/fonts/$f.ttf" "https://github.com/google/fonts/raw/main/ofl/kanit/$f.ttf" || echo "could not download $f"
+          done
           pip install --quiet --upgrade pillow matplotlib edge-tts gTTS
           pip show edge-tts | grep -i version
       - name: Make the clip
@@ -50,7 +54,7 @@ jobs:
           VIDEO=$(python -c "import json;print(json.load(open('meta.json'))['video'])")
           COVER=$(python -c "import json;print(json.load(open('meta.json'))['cover'])")
           mkdir publish && cp clip.mp4 "publish/$VIDEO" && cp cover.jpg "publish/$COVER"
-          cp clip.mp4 publish/latest.mp4 && cp caption.txt publish/caption.txt
+          cp clip.mp4 publish/latest.mp4 && cp caption.txt publish/caption.txt && cp frames.jpg publish/frames.jpg
           cd publish
           git init -q -b clips
           git config user.name "tiktok-clip-bot"
