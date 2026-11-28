@@ -44,7 +44,7 @@ import send_finance as sf  # noqa: E402  (data + chart functions of the daily re
 OUT = HERE / "clip-out"
 WORK = OUT / "work"
 VOICE = "th-TH-PremwadeeNeural"   # female Thai voice (male: th-TH-NiwatNeural)
-RATE = "+5%"
+RATE = "+10%"
 PITCH = "+12Hz"                   # a little higher = more cartoon-like
 PAUSE = 0.35                      # seconds of silence after each sentence
 FPS = 20
@@ -293,8 +293,7 @@ def make_script():
     lines = []
     if gold:
         lines.append((f"ทองคำแท่ง ขายออก {baht(gold['bar_sell'])} บาท",
-                      f"ทองคำแท่งวันนี้ ร้านขายออกบาทละ {baht(gold['bar_sell'])} บาท "
-                      f"รับซื้อคืน {baht(gold['bar_buy'])} บาท"))
+                      f"ทองคำแท่งวันนี้ ร้านขายบาทละ {baht(gold['bar_sell'])} บาท"))
         prev = [v for d, v in sf.history_series("gold_bar_sell") if d < today]
         if prev:
             diff = gold["bar_sell"] - prev[-1]
@@ -367,12 +366,12 @@ def make_script():
     if len(world_moves) >= 2:
         best = max(world_moves, key=lambda m: m[2])
         worst = min(world_moves, key=lambda m: m[2])
-        if best[2] > 0:
-            lines.append((f"ขึ้นแรงสุด: {best[0]} +{best[2]:.1f}%",
-                          f"ตลาดหุ้นต่างประเทศ ที่ขึ้นแรงที่สุดคือ {best[0]} บวก {best[2]:.1f} เปอร์เซ็นต์"))
-        if worst[2] < 0:
-            lines.append((f"ลงแรงสุด: {worst[0]} {worst[2]:.1f}%",
-                          f"ส่วนที่ลงมากที่สุดคือ {worst[0]} ลบ {abs(worst[2]):.1f} เปอร์เซ็นต์ค่ะ"))
+        big = best if abs(best[2]) >= abs(worst[2]) else worst  # only the biggest move, to keep it short
+        if abs(big[2]) >= 0.5:
+            word = "ขึ้น" if big[2] > 0 else "ลง"
+            lines.append((f"หุ้นต่างประเทศที่{word}แรงสุด: {big[0]} {big[2]:+.1f}%",
+                          f"ส่วนหุ้นต่างประเทศ ที่{word}แรงที่สุดคือ {big[0]} "
+                          f"{'บวก' if big[2] > 0 else 'ลบ'} {abs(big[2]):.1f} เปอร์เซ็นต์ค่ะ"))
     if lines:
         scenes.append({"title": "ตลาดหุ้น", "picture": idx_png, "lines": lines})
 
@@ -417,28 +416,87 @@ def _say(engine, voice, rate, text, path):
         raise RuntimeError("no audio")
 
 
+TH_DIGITS = ["ศูนย์", "หนึ่ง", "สอง", "สาม", "สี่", "ห้า", "หก", "เจ็ด", "แปด", "เก้า"]
+TH_UNITS = ["", "สิบ", "ร้อย", "พัน", "หมื่น", "แสน"]
+
+
+def thai_int(n):
+    """58750 -> ห้าหมื่นแปดพันเจ็ดร้อยห้าสิบ"""
+    if n == 0:
+        return "ศูนย์"
+    if n >= 1_000_000:
+        rest = n % 1_000_000
+        return thai_int(n // 1_000_000) + "ล้าน" + (thai_int(rest) if rest else "")
+    out, digits = "", str(n)
+    for i, ch in enumerate(digits):
+        d, pos = int(ch), len(digits) - i - 1
+        if d == 0:
+            continue
+        if pos == 1:
+            out += "สิบ" if d == 1 else "ยี่สิบ" if d == 2 else TH_DIGITS[d] + "สิบ"
+        elif pos == 0:
+            out += "เอ็ด" if d == 1 and n >= 10 else TH_DIGITS[d]
+        else:
+            out += TH_DIGITS[d] + TH_UNITS[pos]
+    return out
+
+
+def say_numbers(text):
+    """Write numbers as Thai words before speaking (the Microsoft voice often refuses
+    sentences with digits, and reads them more naturally this way)."""
+    import re
+
+    def one(m):
+        whole, _, dec = m.group(0).replace(",", "").partition(".")
+        words = thai_int(int(whole))
+        if dec:
+            words += "จุด" + "".join(TH_DIGITS[int(c)] for c in dec)
+        return f" {words} "
+    return re.sub(r"\s+", " ", re.sub(r"\d[\d,]*(?:\.\d+)?", one, text)).strip()
+
+
+def _say_retry(engine, voice, rate, text, path, tries=3):
+    import time
+    for attempt in range(tries):
+        try:
+            _say(engine, voice, rate, text, path)
+            return
+        except Exception as e:
+            print(f"voice {engine} attempt {attempt + 1} failed on '{text}': {e}", file=sys.stderr)
+            if attempt == tries - 1:
+                raise
+            time.sleep(2 * (attempt + 1))
+
+
+def _say_sentence(engine, voice, rate, text, path):
+    """Whole sentence; if refused, say it in 2-3 smaller pieces and join them (same voice)."""
+    try:
+        _say_retry(engine, voice, rate, text, path)
+        return
+    except Exception:
+        if engine != "edge":
+            raise
+    words = text.split()
+    n = 3 if len(words) >= 6 else 2
+    size = -(-len(words) // n)
+    pieces = [" ".join(words[i:i + size]) for i in range(0, len(words), size)]
+    files = []
+    for i, piece in enumerate(pieces):
+        part = path.with_name(f"{path.stem}_{i}.mp3")
+        _say_retry(engine, voice, rate, piece, part)
+        files.append(str(part))
+    run(["ffmpeg", "-y", "-v", "error", "-i", "concat:" + "|".join(files), "-c", "copy", str(path)])
+    print(f"voice {engine}: said in {len(pieces)} pieces: {pieces}")
+
+
 def speak_all(texts, paths):
-    """Record every sentence with the same voice. If a voice keeps failing (after
-    rewording and retrying), start again with the next voice so the clip never mixes voices."""
+    """Record every sentence with the same voice. If a voice keeps failing, start again
+    with the next voice so the clip never mixes voices."""
     import time
     for engine, voice, rate in VOICES:
         try:
             for text, path in zip(texts, paths):
-                # Microsoft's service refuses some sentences ("No audio was received"),
-                # so a slightly reworded version is tried too.
-                variants = [text, f"{text} ค่ะ", f"และ{text}", f"คือ{text} ค่ะ"]
-                for attempt, said in enumerate(variants + [text]):
-                    try:
-                        _say(engine, voice, rate, said, path)
-                        if said != text:
-                            print(f"voice {engine}: reworded to '{said}'")
-                        break
-                    except Exception as e:
-                        print(f"voice {engine} attempt {attempt + 1} failed on '{said}': {e}",
-                              file=sys.stderr)
-                        if attempt == len(variants):
-                            raise
-                        time.sleep(2 * (attempt + 1))
+                _say_sentence(engine, voice, rate, say_numbers(text), path)
                 time.sleep(0.5)  # be gentle with the free service
             print(f"voice used: {engine} {voice} {rate or ''}")
             return
