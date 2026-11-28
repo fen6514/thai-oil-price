@@ -32,7 +32,8 @@ jobs:
         run: |
           sudo apt-get update -qq
           sudo apt-get install -y -qq ffmpeg fonts-noto-core fonts-thai-tlwg libraqm0 libfribidi0 > /dev/null
-          pip install --quiet pillow matplotlib edge-tts
+          pip install --quiet --upgrade pillow matplotlib edge-tts gTTS
+          pip show edge-tts | grep -i version
       - name: Make the clip
         run: python finance-report/make_clip.py
       - name: Keep a copy on the run page (download from "Artifacts")
