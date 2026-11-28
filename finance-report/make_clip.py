@@ -290,15 +290,40 @@ def run(cmd):
     subprocess.run(cmd, check=True, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE)
 
 
+VOICES = [  # tried in order; the first one that works is used for the whole clip
+    ("edge", VOICE, RATE),
+    ("edge", VOICE, "+0%"),
+    ("edge", "th-TH-NiwatNeural", "+0%"),
+    ("google", "th", None),
+]
+_voice = []
+
+
+def _say(engine, voice, rate, text, path):
+    if engine == "edge":
+        import edge_tts
+        asyncio.run(edge_tts.Communicate(text, voice, rate=rate).save(str(path)))
+    else:
+        from gtts import gTTS
+        gTTS(text, lang=voice).save(str(path))
+    if not path.exists() or path.stat().st_size < 1000:
+        raise RuntimeError("no audio")
+
+
 def speak(text, path):
-    import edge_tts
-    for attempt in range(3):
-        try:
-            asyncio.run(edge_tts.Communicate(text, VOICE, rate=RATE).save(str(path)))
-            return
-        except Exception as e:
-            print(f"voice attempt {attempt + 1} failed: {e}", file=sys.stderr)
-    raise RuntimeError("text-to-speech failed 3 times")
+    """Same voice for the whole clip: the first working one is remembered."""
+    choices = _voice or VOICES
+    for engine, voice, rate in choices:
+        for attempt in range(2):
+            try:
+                _say(engine, voice, rate, text, path)
+                if not _voice:
+                    _voice.append((engine, voice, rate))
+                    print(f"voice used: {engine} {voice} {rate or ''}")
+                return
+            except Exception as e:
+                print(f"voice {engine}/{voice} attempt {attempt + 1} failed: {e}", file=sys.stderr)
+    raise RuntimeError("text-to-speech failed")
 
 
 def duration(path):
