@@ -45,7 +45,7 @@ OUT = HERE / "clip-out"
 WORK = OUT / "work"
 VOICE = "th-TH-PremwadeeNeural"   # female Thai voice (male: th-TH-NiwatNeural)
 RATE = "+10%"
-PITCH = "+12Hz"                   # a little higher = more cartoon-like
+PITCH = ""                        # e.g. "+12Hz" for a higher voice (made Microsoft refuse more often)
 PAUSE = 0.35                      # seconds of silence after each sentence
 FPS = 20
 SR = 22050                        # audio sample rate used for lip-sync and the final mix
@@ -408,10 +408,14 @@ VOICES = [  # tried in order; ONE voice is used for the whole clip
 def _say(engine, voice, rate, text, path):
     if engine == "edge":
         import edge_tts
-        asyncio.run(edge_tts.Communicate(text, voice, rate=rate, pitch=PITCH).save(str(path)))
+        kw = {"pitch": PITCH} if PITCH else {}
+        asyncio.run(edge_tts.Communicate(text, voice, rate=rate, **kw).save(str(path)))
     else:
         from gtts import gTTS
-        gTTS(text, lang=voice).save(str(path))
+        slow = path.with_name(path.stem + "_g.mp3")
+        gTTS(text, lang=voice).save(str(slow))
+        # Google's voice is slow - speed it up so the clip stays short
+        run(["ffmpeg", "-y", "-v", "error", "-i", str(slow), "-filter:a", "atempo=1.3", str(path)])
     if not path.exists() or path.stat().st_size < 1000:
         raise RuntimeError("no audio")
 
