@@ -1,0 +1,63 @@
+name: TikTok daily clip
+
+on:
+  schedule:
+    - cron: "47 2 * * *"   # 09:47 Bangkok time (after the 09:27 finance report)
+  workflow_dispatch:
+    inputs:
+      preview:
+        description: "Make the clip only (don't send it to LINE)"
+        type: boolean
+        default: false
+
+permissions:
+  contents: write   # to put the clip on the "clips" branch so LINE can load it
+
+concurrency:
+  group: repo-push
+  cancel-in-progress: false
+
+jobs:
+  clip:
+    runs-on: ubuntu-latest
+    env:
+      FINANCE_LINE_TOKEN: ${{ secrets.FINANCE_LINE_TOKEN }}
+      LINE_USER_ID: ${{ secrets.LINE_USER_ID }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install video tools, Thai fonts and libraries
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq ffmpeg fonts-noto-core fonts-thai-tlwg libraqm0 libfribidi0 > /dev/null
+          pip install --quiet pillow matplotlib edge-tts
+      - name: Make the clip
+        run: python finance-report/make_clip.py
+      - name: Keep a copy on the run page (download from "Artifacts")
+        uses: actions/upload-artifact@v4
+        with:
+          name: tiktok-clip
+          path: |
+            finance-report/clip-out/clip.mp4
+            finance-report/clip-out/caption.txt
+          retention-days: 7
+      - name: Put today's clip on the "clips" branch (only the latest clip is kept)
+        if: ${{ !inputs.preview }}
+        run: |
+          cd finance-report/clip-out
+          VIDEO=$(python -c "import json;print(json.load(open('meta.json'))['video'])")
+          COVER=$(python -c "import json;print(json.load(open('meta.json'))['cover'])")
+          mkdir publish && cp clip.mp4 "publish/$VIDEO" && cp cover.jpg "publish/$COVER"
+          cd publish
+          git init -q -b clips
+          git config user.name "tiktok-clip-bot"
+          git config user.email "actions@users.noreply.github.com"
+          git add . && git commit -q -m "Today's TikTok clip"
+          git push -q -f "https://x-access-token:${{ github.token }}@github.com/${{ github.repository }}.git" clips
+      - name: Send the clip to my LINE
+        if: ${{ !inputs.preview }}
+        run: |
+          sleep 15
+          python finance-report/make_clip.py --send
