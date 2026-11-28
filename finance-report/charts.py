@@ -96,14 +96,17 @@ def table_image(path, title, subtitle, header, rows, col_widths, footnote=""):
     plt.close(fig)
 
 
-def line_chart(path, title, subtitle, points, unit_fmt="{:,.0f}", footnote=""):
-    """points: list of (date, value), oldest first."""
+def line_chart(path, title, subtitle, points, unit_fmt="{:,.0f}", footnote="", updated=""):
+    """points: list of (date, value), oldest first. updated: text shown top-right."""
     dates = [d for d, _ in points]
     vals = [v for _, v in points]
     fig, ax = plt.subplots(figsize=(WIDTH_IN, 6.2), dpi=DPI, facecolor=BG)
     fig.subplots_adjust(left=0.1, right=0.95, top=0.80, bottom=0.14 if footnote else 0.1)
     fig.text(0.035, 0.94, title, fontsize=20, fontweight="bold", color=INK, va="center")
     fig.text(0.035, 0.875, subtitle, fontsize=11.5, color=MUTED, va="center")
+    if updated:
+        fig.text(0.95, 0.94, f"Last update: {updated}", fontsize=12, color=INK,
+                 ha="right", va="center")
 
     ax.plot(dates, vals, color=GOLD, lw=2.6)
     low = min(vals)
@@ -115,7 +118,8 @@ def line_chart(path, title, subtitle, points, unit_fmt="{:,.0f}", footnote=""):
     first, last = vals[0], vals[-1]
     pct = (last / first - 1) * 100 if first else None
     ax.scatter([dates[-1]], [last], color=GOLD, s=50, zorder=3)
-    ax.annotate(unit_fmt.format(last), (dates[-1], last), textcoords="offset points",
+    ax.annotate(f"{unit_fmt.format(last)}  ({dates[-1].strftime('%d %b')})", (dates[-1], last),
+                textcoords="offset points",
                 xytext=(-8, 12), ha="right", fontsize=13, fontweight="bold", color=INK)
     hi_i, lo_i = vals.index(max(vals)), vals.index(low)
     for i, label in ((hi_i, "High"), (lo_i, "Low")):

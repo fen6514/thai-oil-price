@@ -4,8 +4,8 @@ Daily finance report for the "Thai Finance Daily" LINE Official Account.
 Collects:
   - Thai gold prices (Gold Traders Association, goldtraders.or.th) + world gold
   - Exchange rates (baht per USD/EUR/GBP/100 JPY/CNY) + SET index (Yahoo Finance)
-  - Finance news and economic news from Prachachat + Kaohoon, each with the
-    article's opening lines (free). If an ANTHROPIC_API_KEY secret is ever added,
+  - Finance news and economic news from Prachachat + Kaohoon, and politics news
+    from Prachachat + Matichon, each with the article's opening lines (free). If an ANTHROPIC_API_KEY secret is ever added,
     Claude writes the summaries instead. Last resort: Google News headlines.
 and BROADCASTS them to every friend of the LINE account.
 
@@ -89,11 +89,15 @@ ECONOMY_NEWS = ("https://news.google.com/rss/search?q="
 MAX_TITLE = 140  # characters; longer headlines are cut with "…"
 
 # Article feeds for the AI summaries (they include the article text)
-ARTICLE_FEEDS = [  # (source name, feed URL, max articles taken from it)
-    ("ประชาชาติธุรกิจ", "https://www.prachachat.net/finance/feed", 6),
-    ("ข่าวหุ้น", "https://www.kaohoon.com/feed", 6),
-    ("ประชาชาติธุรกิจ", "https://www.prachachat.net/feed", 20),
+ARTICLE_FEEDS = [  # (section, source name, feed URL, max articles taken from it)
+    ("finance", "ประชาชาติธุรกิจ", "https://www.prachachat.net/finance/feed", 6),
+    ("finance", "ข่าวหุ้น", "https://www.kaohoon.com/feed", 6),
+    ("economy", "ประชาชาติธุรกิจ", "https://www.prachachat.net/feed", 20),
+    ("politics", "ประชาชาติธุรกิจ", "https://www.prachachat.net/politics/feed", 6),
+    ("politics", "มติชน", "https://www.matichon.co.th/politics/feed", 6),
 ]
+POLITICS_NEWS = ("https://news.google.com/rss/search?q="
+                 + urllib.parse.quote("การเมือง when:1d -site:facebook.com") + "&hl=th&gl=TH&ceid=TH:th")
 ECONOMY_CATEGORIES = ("Economic", "Finance", "Business", "World", "Real Estate", "เศรษฐกิจ")
 ARTICLE_HOURS = 30        # only articles from roughly the last day
 ARTICLE_CHARS = 1000      # characters of each article sent to Claude
@@ -153,10 +157,14 @@ def safe(fn, *args):
 
 
 # ---------- 1-month history ----------
-def yahoo_series(symbol):
-    """Daily closes for about the last month: [(date, close)], oldest first."""
+def yahoo_chart(symbol):
     url = f"https://query1.finance.yahoo.com/v8/finance/chart/{urllib.parse.quote(symbol)}?range=1mo&interval=1d"
-    res = json.loads(http(url))["chart"]["result"][0]
+    return json.loads(http(url))["chart"]["result"][0]
+
+
+def yahoo_series(symbol, res=None):
+    """Daily closes for about the last month: [(date, close)], oldest first."""
+    res = res or yahoo_chart(symbol)
     by_day = {}
     for ts, c in zip(res.get("timestamp") or [], res["indicators"]["quote"][0]["close"]):
         if c is not None:
@@ -313,16 +321,26 @@ def gold_picture(path, gold):
     import charts
     thai = history_series("gold_bar_sell")
     if len(thai) >= GOLD_HISTORY_MIN:
+        last_day = thai[-1][0]
+        now = datetime.now(BKK)
+        updated = (now.strftime("%d %b %Y, %H:%M (Bangkok)") if last_day == now.date()
+                   else last_day.strftime("%d %b %Y"))
         charts.line_chart(path, "Thai gold bar price - last month",
                           "Gold Traders Association, 96.5% gold bar, sell price (baht per baht-weight)",
-                          thai[-31:], "{:,.0f}", footnote="Source: goldtraders.or.th (saved daily by this bot)")
+                          thai[-31:], "{:,.0f}", footnote="Source: goldtraders.or.th (saved daily by this bot)",
+                          updated=updated)
         return
-    world = yahoo_series("GC=F")
+    res = yahoo_chart("GC=F")
+    world = yahoo_series("GC=F", res)
+    stamp = res.get("meta", {}).get("regularMarketTime")
+    updated = (datetime.fromtimestamp(stamp, BKK).strftime("%d %b %Y, %H:%M (Bangkok)") if stamp
+               else world[-1][0].strftime("%d %b %Y"))
     today_thai = (f"Thai gold bar today: buy {gold['bar_buy']:,.0f} / sell {gold['bar_sell']:,.0f} baht"
                   if gold else "")
     charts.line_chart(path, "World gold price - last month", "US dollars per troy ounce (Gold futures)",
                       world, "{:,.0f}",
-                      footnote=(today_thai + "   |   " if today_thai else "") + "Source: Yahoo Finance")
+                      footnote=(today_thai + "   |   " if today_thai else "") + "Source: Yahoo Finance",
+                      updated=updated)
 
 
 def make_pictures(gold):
@@ -381,7 +399,7 @@ def fetch_articles():
     from email.utils import parsedate_to_datetime
     cutoff = datetime.now(BKK) - timedelta(hours=ARTICLE_HOURS)
     seen, articles = set(), []
-    for source, url, limit in ARTICLE_FEEDS:
+    for section, source, url, limit in ARTICLE_FEEDS:
         try:
             root = ET.fromstring(http(url))
         except Exception as e:
@@ -414,7 +432,8 @@ def fetch_articles():
                 continue
             seen.add(link)
             taken += 1
-            articles.append({"source": source, "title": title, "link": link, "feed": url,
+            articles.append({"section": section, "source": source, "title": title, "link": link,
+                             "feed": url,
                              "categories": cats[:4], "text": text[:ARTICLE_CHARS],
                              "excerpt": excerpt(it.findtext("description"))})
     return articles
@@ -446,16 +465,23 @@ def economy_rank(article):
     return 3
 
 
-def excerpt_news_texts():
-    """Free mode: two LINE texts with each article's opening lines, or None."""
-    articles = [a for a in safe(fetch_articles) or [] if a["excerpt"]]
-    fin_feeds = [a for a in articles if not a["feed"].endswith("prachachat.net/feed")]
+FINANCE_TITLE = "📰 ข่าวการเงิน / ธุรกิจ"
+ECONOMY_TITLE = "🏛️ ข่าวเศรษฐกิจ"
+POLITICS_TITLE = "🗳️ ข่าวการเมือง"
+
+
+def excerpt_sections(articles):
+    """Free mode: {"finance"/"economy"/"politics": LINE text} with each article's opening lines."""
+    articles = [a for a in articles if a["excerpt"]]
     # mix Prachachat finance and Kaohoon so both sources appear
-    pp = [a for a in fin_feeds if "prachachat" in a["feed"]]
-    kh = [a for a in fin_feeds if "kaohoon" in a["feed"]]
+    pp = [a for a in articles if a["section"] == "finance" and "prachachat" in a["feed"]]
+    kh = [a for a in articles if a["section"] == "finance" and "kaohoon" in a["feed"]]
     finance = [a for pair in zip(pp, kh) for a in pair] + pp[len(kh):] + kh[len(pp):]
-    general = [a for a in articles if a["feed"].endswith("prachachat.net/feed")]
-    economy = sorted(general, key=economy_rank)  # stable: newest first within each group
+    economy = sorted([a for a in articles if a["section"] == "economy"],
+                     key=economy_rank)  # stable: newest first within each group
+    # Prachachat first (longer opening lines), Matichon tops up
+    politics = [a for a in articles if a["section"] == "politics" and "prachachat" in a["feed"]]
+    politics += [a for a in articles if a["section"] == "politics" and "prachachat" not in a["feed"]]
 
     def section(title, items):
         if not items:
@@ -466,9 +492,9 @@ def excerpt_news_texts():
                       f"({a['source']}) {a['link']}"]
         return "\n".join(lines)
 
-    texts = [t for t in (section("📰 ข่าวการเงิน / ธุรกิจ", finance),
-                         section("🏛️ ข่าวเศรษฐกิจ", economy)) if t]
-    return texts or None
+    return {"finance": section(FINANCE_TITLE, finance),
+            "economy": section(ECONOMY_TITLE, economy),
+            "politics": section(POLITICS_TITLE, politics)}
 
 
 SUMMARY_PROMPT = """คุณคือบรรณาธิการข่าวเศรษฐกิจที่เขียนสรุปข่าวเช้าให้คนไทยทั่วไปอ่านใน LINE
@@ -502,7 +528,7 @@ SUMMARY_SCHEMA = {
 }
 
 
-def ai_news_texts():
+def ai_news_texts(articles):
     """Two LINE texts (finance, economy) with Claude summaries, or None to fall back."""
     if not os.environ.get("ANTHROPIC_API_KEY", "").strip():
         print("ANTHROPIC_API_KEY not set - using the free article excerpts", file=sys.stderr)
@@ -513,7 +539,6 @@ def ai_news_texts():
         print("anthropic package not installed - using headline-only news", file=sys.stderr)
         return None
 
-    articles = fetch_articles()
     if len(articles) < 4:
         print(f"only {len(articles)} articles found - using headline-only news", file=sys.stderr)
         return None
@@ -601,7 +626,7 @@ def summary_text(gold, pictures, set_value):
     shown = [t for k, t in (("gold", "กราฟราคาทอง 1 เดือน"), ("fx", "ตารางอัตราแลกเปลี่ยนย้อนหลัง 1 เดือน"),
                             ("indices", "ดัชนีหุ้นทั่วโลก")) if k in pictures]
     if shown:
-        lines += ["", "👇 " + " · ".join(shown)]
+        lines += ["", "🖼️ ในรูปภาพ: " + " · ".join(shown)]
     if "fx" not in pictures:  # picture failed - keep the rates as text
         lines += ["", "💱 อัตราแลกเปลี่ยน (บาท)"]
         for symbol, label, mult in FX:
@@ -663,26 +688,36 @@ def news_text(title, url, seen):
 
 
 def news_texts():
-    # 1) Claude summaries (only if an ANTHROPIC_API_KEY secret exists)
-    # 2) free: each article's opening lines from the news feeds
-    # 3) last resort: Google News headlines
-    texts = ai_news_texts() or excerpt_news_texts()
-    if not texts:
-        seen = set()
-        texts = [news_text("📰 ข่าวการเงิน / ธุรกิจ", FINANCE_NEWS, seen),
-                 news_text("🏛️ ข่าวเศรษฐกิจ", ECONOMY_NEWS, seen)]
+    """[finance, economy, politics] LINE texts (missing sections left out).
+    1) Claude summaries for finance/economy (only if an ANTHROPIC_API_KEY secret exists)
+    2) free: each article's opening lines from the news feeds
+    3) last resort per section: Google News headlines"""
+    articles = safe(fetch_articles) or []
+    free = excerpt_sections(articles)
+    ai = ai_news_texts([a for a in articles if a["section"] != "politics"])
+    seen = set()
+    if ai:
+        texts = ai
+    else:
+        texts = [free["finance"] or news_text(FINANCE_TITLE, FINANCE_NEWS, seen),
+                 free["economy"] or news_text(ECONOMY_TITLE, ECONOMY_NEWS, seen)]
+    texts.append(free["politics"] or news_text(POLITICS_TITLE, POLITICS_NEWS, seen))
     return [t for t in texts if t]
 
 
+SEPARATOR = "\n\n━━━━━━━━━━\n\n"
+
+
 def join_limited(texts, limit=4900):
-    """Merge texts into one LINE bubble; drop whole trailing stories if it gets too long."""
-    joined = "\n\n━━━━━━━━━━\n\n".join(texts)
-    while len(joined) > limit:
-        cut = joined.rfind("\n\n", 0, limit)
-        if cut <= 0:
+    """Merge texts into one LINE bubble. If too long, drop the last story of the
+    longest section (repeatedly), so every section keeps at least one story."""
+    sections = [t.split("\n\n") for t in texts]  # [header(, overview), story, story, ...]
+    while len(SEPARATOR.join("\n\n".join(s) for s in sections)) > limit:
+        longest = max(sections, key=len)
+        if len(longest) <= 2:
             break
-        joined = joined[:cut]
-    return joined[:limit]
+        longest.pop()
+    return SEPARATOR.join("\n\n".join(s) for s in sections)[:limit]
 
 
 def text_msg(t):
@@ -702,14 +737,19 @@ def build_messages(with_pictures=True):
     set_value = set_q[0] if set_q else None
     safe(save_history, gold, set_value)
     pictures = make_pictures(gold)
-    msgs = [text_msg(summary_text(gold, pictures, set_value))]
-    msgs += [image_msg(pictures[k]) for k in ("gold", "fx", "indices") if k in pictures]
+    summary = summary_text(gold, pictures, set_value)
+    images = [image_msg(pictures[k]) for k in ("gold", "fx", "indices") if k in pictures]
     news = news_texts()
-    room = 5 - len(msgs)
-    if news and room >= len(news):
-        msgs += [text_msg(t) for t in news]
-    elif news:
-        msgs.append(text_msg(join_limited(news)))
+    if 1 + len(images) + len(news) <= 5:
+        return [text_msg(summary)] + images + [text_msg(t) for t in news]
+    # Too many bubbles: summary + finance news first, then the pictures,
+    # then the other news sections sharing what is left.
+    msgs = [text_msg(join_limited([summary, news[0]]))] + images
+    rest, room = news[1:], 5 - len(msgs)
+    if room >= len(rest):
+        msgs += [text_msg(t) for t in rest]
+    else:
+        msgs += [text_msg(t) for t in rest[:room - 1]] + [text_msg(join_limited(rest[room - 1:]))]
     return msgs
 
 
