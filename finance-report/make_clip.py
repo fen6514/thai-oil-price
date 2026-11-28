@@ -314,16 +314,21 @@ def speak_all(texts, paths):
     for engine, voice, rate in VOICES:
         try:
             for text, path in zip(texts, paths):
-                for attempt in range(5):
+                # Microsoft's service refuses some short sentences ("No audio was received"),
+                # so a slightly reworded version is tried too.
+                variants = [text, f"{text} ค่ะ", f"และ{text}", f"ราคา{text} ค่ะ"]
+                for attempt, said in enumerate(variants + [text]):
                     try:
-                        _say(engine, voice, rate, text, path)
+                        _say(engine, voice, rate, said, path)
+                        if said != text:
+                            print(f"voice {engine}: reworded to '{said}'")
                         break
                     except Exception as e:
-                        print(f"voice {engine} attempt {attempt + 1} failed on '{text}': {e}",
+                        print(f"voice {engine} attempt {attempt + 1} failed on '{said}': {e}",
                               file=sys.stderr)
-                        if attempt == 4:
+                        if attempt == len(variants):
                             raise
-                        time.sleep(3 * (attempt + 1))
+                        time.sleep(2 * (attempt + 1))
                 time.sleep(0.5)  # be gentle with the free service
             print(f"voice used: {engine} {voice} {rate or ''}")
             return
