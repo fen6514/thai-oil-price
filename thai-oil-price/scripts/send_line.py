@@ -8,7 +8,10 @@ Reads data/latest.json, data/tomorrow.json and data/signal.json
 Needs the environment variable LINE_TOKEN (a GitHub secret - never put
 the token in this file). Optional SITE_URL adds a link to the website.
 
-Test without sending:  python scripts/send_line.py --dry-run
+Morning run (before 12:00 Bangkok): PTT + Bangchak prices and the trend outlook.
+Evening run: oil news only (5 stories).
+
+Test without sending:  python scripts/send_line.py --dry-run   (add --evening for the news)
 """
 
 import html
@@ -199,7 +202,8 @@ def news_message():
     items = oil_news()
     if not items:
         return None
-    lines = ["🛢️ ข่าวน้ำมันล่าสุด"]
+    today = datetime.now(BKK).strftime("%Y-%m-%d")
+    lines = ["🛢️ ข่าวน้ำมันล่าสุด (รอบเย็น)", thai_date(today, weekday=True)]
     for i, (title, text, source, link) in enumerate(items, 1):
         lines += ["", f"{i}. {title}"]
         if text:
@@ -225,16 +229,19 @@ def broadcast(texts, token):
 
 
 def main():
-    texts = [build_message()]
     evening = datetime.now(BKK).hour >= 12 or "--evening" in sys.argv
-    if evening:  # the evening report also gets a second bubble with oil news
+    if evening:  # evening report = oil news only (prices are sent in the morning)
         try:
             news = news_message()
-        except Exception as e:  # never let the news stop the price report
-            print(f"oil news skipped: {e}", file=sys.stderr)
+        except Exception as e:
+            print(f"oil news failed: {e}", file=sys.stderr)
             news = None
-        if news:
-            texts.append(news)
+        if not news:
+            print("No new oil news this evening - nothing sent.")
+            return
+        texts = [news]
+    else:
+        texts = [build_message()]
     for t in texts:
         print(t)
         print("-" * 30)
