@@ -148,7 +148,8 @@ def frame(path, scene, caption, progress, big=None):
         box_w, box_h = W - 2 * LEFT, 820
         scale = min((box_w - 32) / im.width, (box_h - 32) / im.height)
         im = im.resize((int(im.width * scale), int(im.height * scale)), Image.LANCZOS)
-        top = max(y + 30, 400)
+        # centre the chart between the title and the subtitle box
+        top = max(y + 30, int((y + 1330) / 2 - (im.height + 32) / 2))
         d.rounded_rectangle([LEFT, top, LEFT + im.width + 32, top + im.height + 32], 28, fill=WHITE)
         img.paste(im, (LEFT + 16, top + 16))
 
@@ -252,8 +253,11 @@ def make_script():
     if sf.safe(sf.indices_picture, idx_png) is None and not idx_png.exists():
         idx_png = None
     moves = []
+    set_hist = sf.history_series("set")
     for name, _market, symbol in sf.INDICES:
         s = sf.safe(sf.yahoo_series, symbol)
+        if s and len(s) < 3 and symbol == "^SET.BK" and set_hist:  # Yahoo often has 1 SET day only
+            s = [h for h in set_hist if h[0] < s[-1][0]] + s[-1:]
         if s and len(s) > 1:
             moves.append((name, s[-1][1], sf.pct_change(s[-1][1], s[-2][1])))
     lines = []
@@ -375,7 +379,7 @@ def build_clip(scenes):
     Image.open(WORK / "f00.png").convert("RGB").save(OUT / "cover.jpg", quality=85)
     # contact sheet of every frame, to check the clip by eye without playing it
     cols, tw, th = 5, 270, 480
-    frames = sorted(WORK.glob("f*.png"))
+    frames = sorted(WORK.glob("f[0-9]*.png"))
     sheet = Image.new("RGB", (cols * tw, -(-len(frames) // cols) * th), (0, 0, 0))
     for i, p in enumerate(frames):
         sheet.paste(Image.open(p).convert("RGB").resize((tw, th)), ((i % cols) * tw, (i // cols) * th))
